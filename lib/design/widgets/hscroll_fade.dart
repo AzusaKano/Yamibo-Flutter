@@ -155,6 +155,13 @@ class _YmHScrollFadeState extends State<YmHScrollFade> {
     }
   }
 
+  /// 渐隐条向右多盖出去的量。
+  ///
+  /// 视口右缘与渐隐右缘完全重合时，抗锯齿会把边缘那一像素各分一半：底下的内容
+  /// 从渐隐里透出来，形成一条竖缝（深色胶囊上尤其明显）。向外多盖 2px 后，
+  /// 视口边缘落在**全实色**的一段里，缝就不会出现。
+  static const double _edgeOverlap = 2;
+
   @override
   Widget build(BuildContext context) {
     final solid = widget.color ?? YmScope.of(context).colors.bg;
@@ -164,7 +171,13 @@ class _YmHScrollFadeState extends State<YmHScrollFade> {
       rows.add(KeyedSubtree(key: _itemKeys[i], child: widget.children[i]));
     }
 
+    final fadeWidth = widget.fadeWidth + _edgeOverlap;
+    // 靠外的 [_edgeOverlap] px 保持实色，再往里才开始渐隐。
+    final solidStop = _edgeOverlap / fadeWidth;
+
     return Stack(
+      // 渐隐条要压过视口右缘，不能被 Stack 边界裁掉。
+      clipBehavior: Clip.none,
       children: [
         SingleChildScrollView(
           controller: _ctrl,
@@ -176,8 +189,8 @@ class _YmHScrollFadeState extends State<YmHScrollFade> {
           Positioned(
             top: 0,
             bottom: 0,
-            right: 0,
-            width: widget.fadeWidth,
+            right: -_edgeOverlap,
+            width: fadeWidth,
             child: IgnorePointer(
               child: DecoratedBox(
                 key: YmHScrollFade.fadeKey,
@@ -185,7 +198,8 @@ class _YmHScrollFadeState extends State<YmHScrollFade> {
                   gradient: LinearGradient(
                     begin: Alignment.centerRight,
                     end: Alignment.centerLeft,
-                    colors: <Color>[solid, solid.withValues(alpha: 0)],
+                    colors: <Color>[solid, solid, solid.withValues(alpha: 0)],
+                    stops: <double>[0, solidStop, 1],
                   ),
                 ),
               ),

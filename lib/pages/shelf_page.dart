@@ -551,15 +551,19 @@ class _ShelfPageState extends State<ShelfPage> {
 
   /// 细边胶囊筛选行（任务 2 / 3）：横滑 + 右缘渐隐，与首页类型胶囊同一套；
   /// 纵向 14 节奏（tab 行自己已留 14，这里只补到列表的 14）。
-  Widget _filterRow(List<Widget> chips) {
+  Widget _filterRow(List<Widget> chips, {int? focusIndex}) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(YmLayout.pagePad, 0, YmLayout.pagePad, 14),
       // ⚠ `YmHScrollFade` 内部是 Stack，不给紧约束时会按内容宽度收缩，
-      // 而 Column 默认把子项居中 ⇒ 胶囊会跑到屏幕中间（2026-11-25 真机反馈）。
-      // 撑满一行后由内部 SingleChildScrollView 顶左排。
+      // 而 Column 默认把子项居中 ⇒ 胶囊会跑到屏幕中间。撑满一行后顶左排。
       child: SizedBox(
         width: double.infinity,
-        child: YmHScrollFade(spacing: 8, children: chips),
+        child: YmHScrollFade(
+          spacing: 8,
+          // 选中项滚到可视区中间：点击靠右的胶囊后也能看到完整名字。
+          focusIndex: focusIndex,
+          children: chips,
+        ),
       ),
     );
   }
@@ -777,15 +781,25 @@ class _ShelfPageState extends State<ShelfPage> {
                       ),
                       _tabs(),
                       if (_tab == _tabLocal && showKindRow)
-                        _filterRow([
-                          _lineChip('小说', kind == 'novel', () => _pickKind('novel')),
-                          _lineChip('漫画', kind == 'manga', () => _pickKind('manga')),
-                        ]),
+                        _filterRow(
+                          [
+                            _lineChip('小说', kind == 'novel', () => _pickKind('novel')),
+                            _lineChip('漫画', kind == 'manga', () => _pickKind('manga')),
+                          ],
+                          focusIndex: kind == 'novel'
+                              ? 0
+                              : (kind == 'manga' ? 1 : null),
+                        ),
                       if (_tab == _tabTracked && showBoardRow)
-                        _filterRow([
-                          for (final b in boards)
-                            _lineChip(b, board == b, () => _pickBoard(b)),
-                        ]),
+                        _filterRow(
+                          [
+                            for (final b in boards)
+                              _lineChip(b, board == b, () => _pickBoard(b)),
+                          ],
+                          focusIndex: board.isEmpty
+                              ? null
+                              : boards.indexOf(board),
+                        ),
                       Expanded(
                         child: _tab == _tabLocal
                             ? _localBody(context, lib, localItems)
