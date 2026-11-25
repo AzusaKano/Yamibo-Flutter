@@ -1,0 +1,30 @@
+# 本仓库只跟踪「能构建出这个 App 的最小集合」。
+# 采用白名单：根目录下未被显式放行的条目一律不跟踪。
+# 新增根目录文件默认不公开，确需公开时在下面补一行 !。
+
+/*
+!/.gitignore
+!/LICENSE
+!/NOTICE.md
+!/README.md
+!/analysis_options.yaml
+!/pubspec.yaml
+!/pubspec.lock
+!/lib/
+!/assets/
+!/android/
+
+# 显式排除（即使父目录已放行）
+/android/build/
+/android/.gradle/
+/android/.kotlin/
+/android/local.properties
+/android/key.properties
+*.jks
+*.keystore
+*.p12
+
+# IDE
+*.iml
+.idea/
+.vscode/

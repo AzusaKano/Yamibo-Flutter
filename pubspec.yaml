@@ -1,0 +1,30 @@
+name: yamibo_flutter
+description: "百合会第三方客户端 · Flutter 离线样板"
+publish_to: 'none'
+version: 0.1.53+2078
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # 文本框长按菜单（复制 / 粘贴 / 全选…）的中文来自 Material 本地化；
+  # 这是 Flutter SDK 自带包，不是第三方依赖。
+  flutter_localizations:
+    sdk: flutter
+  flutter_svg: ^2.3.0
+  package_info_plus: ^10.2.2
+  webview_flutter: ^4.14.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icons/
+    # 「关于」页要显示品牌图标；之前漏登记，Image.asset 解析不到。
+    - assets/icon/app-icon-1024.png
