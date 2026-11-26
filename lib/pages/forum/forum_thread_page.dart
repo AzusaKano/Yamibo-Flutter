@@ -212,6 +212,43 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
   final GlobalKey _menuKey = GlobalKey();
   bool _menuOpen = false;
 
+  /* ---------------------------- 只看楼主（客户端筛选） ---------------------------- */
+
+  /// 楼主 uid；空串 = 正常模式（v4 口径：只在渲染层过滤，加载链路一个字不改）。
+  String _opUid = '';
+  String _opName = '';
+
+  /// 切模式前视口顶那一楼（退出 / 定位用）。
+  String _opTopPid = '';
+  int _opTopFloor = 0;
+
+  /// 楼主身份拿不到（懒拉第 1 页也拿不到）：本次会话禁用菜单项，不再反复试。
+  bool _opUidFailed = false;
+
+  /// 懒拉楼主 uid 在路上（防连点叠请求）。
+  bool _opUidLoading = false;
+
+  /// 只看楼主空态下的补载在进行（防重复）。
+  bool _supplementing = false;
+
+  /// 正在滚向的目标楼 pid（跳楼层 / 切模式用）。
+  ///
+  /// 有这个值时把列表的预铺窗口放到全量（同进场锚点的做法）——否则「每次跳
+  /// 0.8 屏再找 key」会从中途跨过目标楼，导致目标永远没被铺出来，一路滑到底。
+  String _jumpTargetPid = '';
+
+  /// 当前模式下真正可见的楼层（正常模式 = 全部；只看楼主 = 楼主发言）。
+  List<ForumPost> get _visiblePosts => _opUid.isEmpty
+      ? _posts
+      : <ForumPost>[
+          for (final p in _posts)
+            if (p.authorUid == _opUid) p,
+        ];
+
+  /// 可跳的楼号（只含当前可见楼层，升序）—— 跳楼层弹层的数据源。
+  List<int> get _jumpFloors =>
+      (<int>[for (final p in _visiblePosts) p.floor])..sort();
+
   /// 首次载入是否完成（[ForumThreadPage.initialPage] 可以不是 1，
   /// 标题 / 楼层列表的初始化按「第一次成功载入」判定，不按页码 1）。
   bool _firstLoaded = false;
@@ -397,7 +434,22 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
           // 补页不直接进主列表：先挂在列表最底部当「量尺」（底部追加不闪），
           // 量出高度后在帧间隙里「偏移 +H + 搬家到顶部」同帧完成——
           // 直接插到顶部会让「没校准的那一帧」上屏，真机就是一下闪烁。
-          _pendingPrepend = data.posts;
+          //
+          // 只看楼主：量尺必须只量**过滤后**的楼（用户看到的增量才是 H）。
+          // 这一页里一条楼主发言都没有 ⇒ 可见集不变，直接并表、不量不动，
+          // 否则会凭空制造一次位置跳动。
+          final visiblePart = _opUid.isEmpty
+              ? data.posts
+              : <ForumPost>[
+                  for (final p in data.posts)
+                    if (p.authorUid == _opUid) p,
+                ];
+          if (visiblePart.isEmpty) {
+            _posts.insertAll(0, data.posts);
+            _pendingPrepend = null;
+          } else {
+            _pendingPrepend = data.posts;
+          }
           for (final p in data.posts) {
             _postPage[p.pid] = data.page;
           }
@@ -483,7 +535,8 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
   bool get _hasPrev => _lowestPage > 1;
 
   /// 全帖正文图（按楼层顺序收平，H 查看器「同帖多图左右连看」的序列）。
-  List<String> get _allImages => <String>[for (final p in _posts) ...p.images];
+  /// 只看楼主模式只收可见楼层——否则连看会跳到被过滤掉的楼里的图。
+  List<String> get _allImages => <String>[for (final p in _visiblePosts) ...p.images];
 
   /// 点图进查看器：定位到被点那张（H 屏验收：带 Referer 才加载，YmForumImage 出口）。
   void _openImage(String url) {
@@ -796,6 +849,173 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
     );
   }
 
+  /* -------------------------- 只看楼主：进出与补载 -------------------------- */
+
+  /// 拿楼主 uid：首楼在内存就直接用；不在（从第 5 页 / findpost 进来、或补页
+  /// 把首楼搬走前）懒拉一次第 1 页。拿不到返回空串（不按昵称猜）。
+  Future<String> _resolveOpUid() async {
+    final first = _posts.where((p) => p.floor == 1).firstOrNull;
+    if (first != null && first.authorUid.isNotEmpty) {
+      _opName = first.author;
+      return first.authorUid;
+    }
+    if (_opUidLoading) return '';
+    _opUidLoading = true;
+    try {
+      final data = await fetchForumThread(widget.tid, page: 1);
+      final op = data.posts.where((p) => p.floor == 1).firstOrNull;
+      _opName = op?.author ?? '';
+      return op?.authorUid ?? '';
+    } catch (_) {
+      return '';
+    } finally {
+      _opUidLoading = false;
+    }
+  }
+
+  /// 菜单「只看楼主 / 看全部回复」：只切渲染层，不重载、不发请求。
+  Future<void> _toggleOnlyOp() async {
+    if (_opUid.isNotEmpty) {
+      await _exitOnlyOp();
+      return;
+    }
+    final top = _topPostSnapshot();
+    _opTopPid = top?.pid ?? '';
+    _opTopFloor = top?.floor ?? 0;
+    final uid = await _resolveOpUid();
+    if (!mounted) return;
+    if (uid.isEmpty) {
+      setState(() => _opUidFailed = true);
+      showYmToast(context, '没拿到楼主身份，暂时不能筛选');
+      return;
+    }
+    setState(() {
+      _opUid = uid;
+      _opUidFailed = false;
+    });
+    _anchorAfterToggle();
+    // 当前范围内一条楼主发言都没有：顺手补 3 页，别让用户对着空白。
+    // 已经有一条就不再自动翻页——普通帖楼主只发过首楼，后台翻 12 页纯属浪费。
+    if (_visiblePosts.isEmpty) unawaited(_supplementForOp(3));
+  }
+
+  Future<void> _exitOnlyOp() async {
+    final pid = _topPostSnapshot()?.pid ?? '';
+    setState(() {
+      _opUid = '';
+      _opName = '';
+    });
+    if (pid.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_scrollToPost(pid));
+    });
+  }
+
+  /// 切模式后把视口钉回原来那一楼：
+  /// 还在 → 钉它；被过滤掉 → 钉它之后最近的一条，再退到它之前最近的一条。
+  void _anchorAfterToggle() {
+    final visible = _visiblePosts;
+    if (visible.isEmpty) return;
+    String target = '';
+    if (_opTopPid.isNotEmpty && visible.any((p) => p.pid == _opTopPid)) {
+      target = _opTopPid;
+    } else {
+      final after = visible.where((p) => p.floor > _opTopFloor).firstOrNull;
+      final before = visible.where((p) => p.floor <= _opTopFloor).lastOrNull;
+      target = (after ?? before)?.pid ?? '';
+    }
+    if (target.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_scrollToPost(target));
+    });
+  }
+
+  /// 只看楼主空态补载：顺序加载后续页，最多 [budget] 页，够了/到底就停。
+  Future<void> _supplementForOp(int budget) async {
+    if (_supplementing || _opUid.isEmpty) return;
+    setState(() => _supplementing = true);
+    try {
+      for (var i = 0; i < budget; i++) {
+        if (!mounted || _opUid.isEmpty) return;
+        if (_visiblePosts.isNotEmpty) return;
+        if (!_hasMore) return;
+        if (_loading) {
+          await Future<void>.delayed(const Duration(milliseconds: 150));
+          continue;
+        }
+        final before = _highestPage;
+        await _load(_highestPage + 1);
+        if (!mounted) return;
+        // 页码没推进（到底 / 越界被站点回末页 / 加载失败）：别在这儿空转
+        if (_highestPage == before) return;
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+      }
+    } finally {
+      if (mounted) setState(() => _supplementing = false);
+    }
+  }
+
+  /* ------------------------------ 跳到楼层 ------------------------------ */
+
+  /// 滚到某一楼：先把这个目标告诉列表（放大预铺窗口，保证目标一定会被铺出来），
+  /// 滚完撤掉。跳楼层 / 切筛选 / 退出筛选三处共用。
+  Future<void> _scrollToPost(String pid) async {
+    if (pid.isEmpty || !mounted) return;
+    setState(() => _jumpTargetPid = pid);
+    try {
+      await _scrollToAnchor(pid: pid, force: true);
+    } finally {
+      if (mounted) setState(() => _jumpTargetPid = '');
+    }
+  }
+
+  /// 菜单「跳到楼层」：弹层里把**当前可见的楼号**全铺成按钮，点哪个跳哪个。
+  /// 范围由清单本身表达，不输入、不校验、不预估页码、不发请求。
+  Future<void> _openFloorJump() async {
+    final floors = _jumpFloors;
+    if (floors.length < 2) return;
+    final cur = _topPostSnapshot()?.floor;
+    final picked = await showYmSheet<int>(
+      context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            14,
+            14,
+            14,
+            14 + MediaQuery.paddingOf(ctx).bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '跳到哪一楼',
+                style: TextStyle(
+                  fontSize: YmFont.strong16,
+                  fontWeight: FontWeight.w700,
+                  color: YmScope.of(ctx).colors.text,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: _FloorJumpGrid(
+                  floors: floors,
+                  current: cur,
+                  onPick: (f) => Navigator.of(ctx).pop(f),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final target = _visiblePosts.where((p) => p.floor == picked).firstOrNull;
+    if (target == null) return;
+    await _scrollToPost(target.pid);
+  }
+
   /// 右上角菜单：位置显式从触发器 RenderBox 算出（资产包菜单不做自动翻转 / 测量）。
   Future<void> _openMenu() async {
     if (_menuOpen || !mounted) return;
@@ -818,6 +1038,27 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
         origin: YmMenuOrigin.topRight,
       ),
       sections: [
+        YmMenuSection(
+          items: [
+            // 只看楼主：客户端筛选，checked 表示开启态（与站方「看全部」同一语义）
+            YmMenuItemData(
+              label: _opUid.isEmpty ? '只看楼主' : '看全部回复',
+              checked: _opUid.isNotEmpty,
+              description: _opUid.isEmpty
+                  ? (_opName.isEmpty ? null : '只看 $_opName 的发言')
+                  : '当前已显示 ${_visiblePosts.length} 条',
+              enabled: _opUid.isNotEmpty || !_opUidFailed,
+              onTap: _toggleOnlyOp,
+            ),
+            // 跳到楼层：只列已加载（当前可见）的楼，单帖单楼时没有可跳的
+            YmMenuItemData(
+              label: '跳到楼层',
+              enabled: _jumpFloors.length > 1,
+              onTap: _openFloorJump,
+            ),
+          ],
+          separatorAfter: true,
+        ),
         YmMenuSection(
           items: [
             YmMenuItemData(label: '刷新', onTap: _refreshCurrentPage),
@@ -971,6 +1212,7 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
   @override
   Widget build(BuildContext context) {
     final c = YmScope.of(context).colors;
+    final visible = _visiblePosts;
     return Scaffold(
       body: Column(
         children: [
@@ -979,10 +1221,15 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
             title: _boardName.isEmpty ? '帖子' : _boardName,
             // 页码信息只放右上角按钮（正在读的页）；副标题不重复
             // 副行只表达「当前读的这一页来自副本」：部分下载时会混着在线页，
-            // 翻到在线页就不该还挂着「离线」（2026-11-24 真机反馈）
-            subtitle: _page == 0 && _loading
-                ? '正在加载…'
-                : (_cachedPages.contains(_currentPage) ? '离线' : null),
+            // 翻到在线页就不该还挂着「离线」（2026-11-24 真机反馈）。
+            // 只看楼主模式下页码已不代表阅读页，副行改说模式，不再标离线。
+            subtitle: _opUid.isNotEmpty
+                ? (_supplementing
+                    ? '只看楼主 · 正在补齐（已到第 $_highestPage 页）'
+                    : '只看楼主')
+                : (_page == 0 && _loading
+                    ? '正在加载…'
+                    : (_cachedPages.contains(_currentPage) ? '离线' : null)),
             // 页码胶囊 + 菜单件横排；单页帖没有页码钮时菜单仍在。
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1003,9 +1250,13 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
                         border: Border.all(color: c.border),
                       ),
                       child: Text(
-                        // 显示「正在读的页 / 总页数」（跟随视口；0.1.22 拍板：
-                        // 外观不变，只把数字从已加载页换成阅读页）
-                        '${_readingPage > 0 ? _readingPage : _page} / $_totalPages 页',
+                        // 正常模式：显示「正在读的页 / 总页数」（跟随视口；0.1.22 拍板：
+                        // 外观不变，只把数字从已加载页换成阅读页）。
+                        // 只看楼主：相邻两条可见发言可能隔好几页，「正在读」会乱跳，
+                        // 改说「已载到第几页」——用户看的是"能读到哪儿"，不是页码。
+                        _opUid.isNotEmpty
+                            ? '已载 $_highestPage / $_totalPages 页'
+                            : '${_readingPage > 0 ? _readingPage : _page} / $_totalPages 页',
                         style: TextStyle(
                           fontSize: YmFont.small12,
                           fontWeight: FontWeight.w700,
@@ -1062,7 +1313,9 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
               // 楼层校正，铺得越快收得越准（长文帖 20 楼一页的极端情形实测踩过）。
               // 补页量尺期间开全量窗口（挂底的量尺要活到量完高度那一帧）
               scrollCacheExtent:
-                      _anchorPid.isNotEmpty || _pendingPrepend != null
+                      _anchorPid.isNotEmpty ||
+                              _jumpTargetPid.isNotEmpty ||
+                              _pendingPrepend != null
                   ? const ScrollCacheExtent.pixels(100000)
                   : null,
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 86),
@@ -1081,7 +1334,11 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
                         : (_errorCode == 'WAF' ? '去验证' : '重试'),
                     onAction: _errorCode == 'WAF' ? _openWafVerify : () => _load(1),
                   ),
-                for (final post in _posts)
+                // 只看楼主：加载范围内一条楼主发言都没有（常见于楼主只在很深的
+                // 页里发过言）——给一句人话 + 「继续加载」，不自动把整帖翻完
+                if (_opUid.isNotEmpty && visible.isEmpty && !_loading && _error == null)
+                  _buildOpEmptyHint(),
+                for (final post in visible)
                   YmForumPostCard(
                     key: _keyFor(post.pid),
                     post: post,
@@ -1101,7 +1358,7 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
                 // 只会诱发越界请求（站点原样回末页内容，0.1.23 实测）
                 if (_totalPages != 1)
                   YmLoadMore(
-                    loading: _loading,
+                    loading: _loading || _supplementing,
                     hasMore: _hasMore,
                     doneText: _totalPages > 0
                         ? '已是最后一页 · 共 $_totalPages 页'
@@ -1110,28 +1367,31 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
                   ),
                 if (_error != null && _posts.isNotEmpty) YmTip(_error!),
                 // 补页量尺：先挂在最底部量高度（offscreen，用户看不见），
-                // 量完在 _finishPrepend 里搬到家顶部
+                // 量完在 _finishPrepend 里搬到家顶部。
+                // 只看楼主：量尺只放**过滤后**的那几楼——拿未过滤的 20 楼量，
+                // 量出来的 H 会远大于实际新增高度，位置会被顶飞。
                 if (_pendingPrepend != null)
                   Column(
                     key: _prependedKey,
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       for (final post in _pendingPrepend!)
-                        YmForumPostCard(
-                          key: _keyFor(post.pid),
-                          post: post,
-                          isOp: post.floor == 1,
-                          commentsExpanded: _expandedComments.contains(post.pid),
-                          onToggleComments: () => setState(() {
-                            if (!_expandedComments.add(post.pid)) {
-                              _expandedComments.remove(post.pid);
-                            }
-                          }),
-                          onReply: _openWeb,
-                          onOpenPoll: () => _openPollWeb(post),
-                          onOpenImage: _openImage,
-                          onOpenLink: _openLink,
-                        ),
+                        if (_opUid.isEmpty || post.authorUid == _opUid)
+                          YmForumPostCard(
+                            key: _keyFor(post.pid),
+                            post: post,
+                            isOp: post.floor == 1,
+                            commentsExpanded: _expandedComments.contains(post.pid),
+                            onToggleComments: () => setState(() {
+                              if (!_expandedComments.add(post.pid)) {
+                                _expandedComments.remove(post.pid);
+                              }
+                            }),
+                            onReply: _openWeb,
+                            onOpenPoll: () => _openPollWeb(post),
+                            onOpenImage: _openImage,
+                            onOpenLink: _openLink,
+                          ),
                     ],
                   ),
               ],
@@ -1187,6 +1447,46 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
             Text(
               '${_fmtCount(_views)} 浏览 · $_replies 回复',
               style: TextStyle(fontSize: YmFont.small12, color: c.text3),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 只看楼主空态：加载范围内没有楼主发言时的人话 + 「继续加载」。
+  /// 不做全自动补载（普通帖楼主往往只发过首楼，后台翻十几页纯属浪费）。
+  Widget _buildOpEmptyHint() {
+    final c = YmScope.of(context).colors;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(YmRadius.card),
+        boxShadow: YmShadows.pop,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _hasMore
+                ? '已加载到第 $_highestPage 页，还没看到楼主的其它发言'
+                : '已加载的页里没有楼主的发言',
+            style: TextStyle(
+              fontSize: YmFont.sub13,
+              height: 1.5,
+              color: c.text2,
+            ),
+          ),
+          if (_hasMore) ...[
+            const SizedBox(height: 12),
+            YmButton(
+              kind: YmButtonKind.tint,
+              height: 46,
+              expanded: true,
+              label: _supplementing ? '正在加载…' : '继续加载',
+              onTap: _supplementing ? null : () => unawaited(_supplementForOp(3)),
             ),
           ],
         ],
@@ -1439,6 +1739,106 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 楼层清单（「电梯面板」）：固定列数网格，只建可见单元格，千楼级也不卡。
+///
+/// 数据全是当前**可见**楼层的楼号（升序），所以不存在"输入了却跳不到"的路径；
+/// 打开时直接把滚动位置算到当前楼那一行（首帧就位，不会先闪到顶部再滚）。
+class _FloorJumpGrid extends StatefulWidget {
+  const _FloorJumpGrid({
+    required this.floors,
+    required this.current,
+    required this.onPick,
+  });
+
+  final List<int> floors;
+
+  /// 当前视口顶那一楼（没有就从头显示）。
+  final int? current;
+
+  final void Function(int floor) onPick;
+
+  @override
+  State<_FloorJumpGrid> createState() => _FloorJumpGridState();
+}
+
+class _FloorJumpGridState extends State<_FloorJumpGrid> {
+  /// 胶囊 42 高（≥40 触控档）+ 8 间距。
+  static const double _gap = 8;
+  static const double _cellH = 42;
+  static const double _rowH = _cellH + _gap;
+
+  ScrollController? _scroll;
+  int _cross = 0;
+
+  ScrollController _controllerFor(int cross) {
+    final existing = _scroll;
+    if (existing != null && _cross == cross) return existing;
+    existing?.dispose();
+    final idx =
+        widget.current == null ? -1 : widget.floors.indexOf(widget.current!);
+    final row = idx <= 0 ? 0 : idx ~/ cross;
+    _cross = cross;
+    // 留一行上下文：当前楼上面还能看到一行，不至于贴顶
+    return _scroll = ScrollController(
+      initialScrollOffset: row <= 2 ? 0 : (row - 2) * _rowH,
+    );
+  }
+
+  @override
+  void dispose() {
+    _scroll?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width - 28;
+        // 64 = 三位数胶囊的舒适宽；列数收在 4..7，窄屏也不会挤成两列
+        final cross = ((width + _gap) / (64 + _gap)).floor().clamp(4, 7).toInt();
+        final rows = (widget.floors.length / cross).ceil();
+        final contentH = rows * _rowH;
+        final maxH =
+            constraints.maxHeight.isFinite ? constraints.maxHeight : contentH;
+        // 一屏放得下就按内容高度收（弹层不留一大片空白）；放不下才滚动
+        final scrollable = contentH > maxH;
+        return GridView.builder(
+          controller: _controllerFor(cross),
+          shrinkWrap: !scrollable,
+          physics: scrollable
+              ? const ClampingScrollPhysics()
+              : const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: cross,
+            mainAxisSpacing: _gap,
+            crossAxisSpacing: _gap,
+            mainAxisExtent: _cellH,
+          ),
+          itemCount: widget.floors.length,
+          itemBuilder: (context, i) {
+            final floor = widget.floors[i];
+            return Center(
+              child: YmChip(
+                style: YmChipStyle.pill,
+                pressKind: YmPressKind.solid,
+                label: '$floor',
+                // 高亮 = 当前视口顶那一楼（与页码盘高亮当前页同一语义）
+                active: floor == widget.current,
+                compact: true,
+                onTap: () => widget.onPick(floor),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
