@@ -19,8 +19,8 @@ import 'package:yamibo_flutter/pages/about_page.dart';
 /// 成对」的契约绑在一起，改名会让引用它的地方对不上。
 
 /// 假版本：必须与 `pubspec.yaml` 的 `version:` 同步（第二条测试看守）。
-const String _fakeVersion = '0.1.54';
-const String _fakeBuild = '2079';
+const String _fakeVersion = '0.1.55';
+const String _fakeBuild = '2080';
 
 Widget _harness() {
   final colors = YmColors.yamiboLight;

@@ -1,7 +1,7 @@
 name: yamibo_flutter
-description: "百合会第三方客户端 · Flutter 离线样板"
+description: "百合会第三方客户端（非官方）· Flutter"
 publish_to: 'none'
-version: 0.1.54+2079
+version: 0.1.55+2080
 
 environment:
   sdk: ^3.13.5

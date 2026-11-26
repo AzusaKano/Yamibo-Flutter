@@ -77,6 +77,9 @@ ForumHome parseForumHome(String html) {
 /// 点评块的 `plc p0 cl id="commentdetail…"` 不是这个形状，不会误入。
 final _floorStartRe = RegExp(r'<div class="plc cl" id="pid(\d+)">');
 
+/// 正文起点：`<div class="message">`。站点当前不带属性，留 `[^>]*` 容错。
+final _messageOpenRe = RegExp(r'<div class="message"[^>]*>');
+
 /// 站方「热点推荐」解析（PC 版论坛首页的 DIY 模块，手机模板不印）：
 /// 管理员后台手选的全站热点，条目形状：
 /// `<div class="tit"><h2>热点推荐</h2></div>` 后跟
@@ -301,16 +304,23 @@ ForumPost? _parseFloor(String block, {required String pid, List<ForumTocEntry>? 
   final mtimeLi = _first(block, RegExp(r'<li class="mtime">([\s\S]*?)</li>')) ?? '';
   final time = stripTags(mtimeLi.replaceAll(RegExp(r'<span class="y">[\s\S]*?</span>'), ''));
 
-  // 正文：message 起点到 点评区 / 评分标题 / 评分表 任一锚点
-  final msgAt = block.indexOf('<div class="message">');
+  // 正文：message 起点到「回复按钮 / 点评区 / 评分标题 / 评分表」最早的一个。
+  // 登录态楼层会在 message 收口之后、点评区之前插
+  // `<div class="replybtn"><a>回复</a></div>`（点了楼层才显示，但节点一直在
+  // HTML 里）——必须把它当成正文终点，否则按钮文案会落进正文末尾。
+  // 注意：不能改用 message 自己的 `</div>` 收口——站点有些楼层把图片列表
+  // （`ul.img_one`）放在 message 收口**之后**、点评区之前，按收口截会丢图。
   var message = '';
-  if (msgAt >= 0) {
-    message = _until(block, msgAt, [
+  final msgOpen = _messageOpenRe.firstMatch(block);
+  if (msgOpen != null) {
+    message = _until(block, msgOpen.start, [
+      RegExp(r'<div id="replybtn_'),
+      RegExp(r'<div class="replybtn'),
       RegExp(r'<div id="comment_'),
       RegExp(r'<h3 class="psth'),
       RegExp(r'<div id="ratelog_'),
       RegExp(r'<div class="threadlist_foot'),
-    ]).replaceFirst(RegExp(r'^<div class="message">'), '');
+    ]).replaceFirst(_messageOpenRe, '');
   }
 
   // 投票块藏在首楼 message 里，先摘出来再转正文

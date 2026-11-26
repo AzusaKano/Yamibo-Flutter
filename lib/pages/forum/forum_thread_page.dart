@@ -545,30 +545,41 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
     openForumImageViewer(context, images, initial: idx < 0 ? 0 : idx);
   }
 
-  /// 楼层「回复」出口（0.1.38）：直接开**回帖表单页**并带上本楼 pid（`reppost`）。
+  /// 楼层「回复」出口（0.1.38）：直接开**回帖表单页**并带上本楼 pid（`repquote`）。
   ///
   /// 旧实现是「开这一楼所在的浏览页 + 带楼层锚点」，用户还得在网页里自己点
   /// 「发表回复」——第二步正好撞上写操作被截回原生的 bug（0.1.37 实测），
   /// 流程死在那里。现在一步到位：落在表单页就能打字。
   /// 页码按「本楼所在的站点页」传，与连读多页后回复旧页楼层的口径一致。
+  /// 标题给「回复 N#」：网页里立刻看得出回的是哪一楼。
   void _openWeb(ForumPost post) {
-    _openReplyForm(pid: post.pid, page: _postPage[post.pid] ?? _page);
+    _openReplyForm(
+      pid: post.pid,
+      page: _postPage[post.pid] ?? _page,
+      title: '回复 ${post.floor}#',
+    );
   }
 
-  /// 底栏「回复这个话题」：主题级回复（**不带** `reppost`，不用挑楼层），
+  /// 底栏「回复这个话题」：主题级回复（**不带** `repquote`，不用挑楼层），
   /// 页码跟「正在读的页」（连读多页时按用户眼前这页回）。
-  void _openTopicWeb() =>
-      _openReplyForm(page: _readingPage > 0 ? _readingPage : _page);
+  void _openTopicWeb() => _openReplyForm(
+        page: _readingPage > 0 ? _readingPage : _page,
+        title: '回复',
+      );
 
   /// 开回帖表单页。提交成功后由 [openForumReplyPage] 关掉网页壳并回调这里刷新。
-  void _openReplyForm({String? pid, int page = 1}) {
+  void _openReplyForm({
+    String? pid,
+    int page = 1,
+    required String title,
+  }) {
     unawaited(openForumReplyPage(
       context,
       tid: widget.tid,
       fid: _fid,
       pid: pid,
       page: page <= 0 ? 1 : page,
-      title: _title.isEmpty ? '百合会论坛' : _title,
+      title: title,
       onSubmitted: _reloadAfterReply,
     ));
   }

@@ -177,9 +177,11 @@ String forumWafPassValue(String header) {
 }
 
 /// 回帖表单页地址（0.1.38）。形态照抄 6 个本地实抓样本，别自己改参数顺序：
-/// `forum.php?mod=post&action=reply&fid=<板块号>&tid=<帖号>[&reppost=<楼pid>]&page=1&mobile=2`
+/// `forum.php?mod=post&action=reply&fid=<板块号>&tid=<帖号>[&repquote=<楼pid>]&page=1&mobile=2`
 ///
-/// - [pid] 传了 = 回复**某一楼**（站点叫 `reppost`）：楼层卡的「回复」走这条；
+/// - [pid] 传了 = 回复**某一楼**：站点楼层「回复」按钮用的参数是 `repquote`
+///   （会带被回复楼的引用块，`reppid` / `reppost` 隐藏字段服务端自己补）；
+///   旧口径用 `reppost` 只会写隐藏字段、页面看起来仍是主题回复；
 /// - 不传 = 主题级回复：底部回复条走这条；
 /// - [fid] 空 = 这个参数整个不带（站点按 tid 自己认），不编板块号。
 String forumReplyPath({
@@ -191,7 +193,7 @@ String forumReplyPath({
   final buf = StringBuffer('/forum.php?mod=post&action=reply');
   if (fid.isNotEmpty) buf.write('&fid=$fid');
   buf.write('&tid=$tid');
-  if (pid != null && pid.isNotEmpty) buf.write('&reppost=$pid');
+  if (pid != null && pid.isNotEmpty) buf.write('&repquote=$pid');
   buf.write('&page=$page&mobile=2');
   return buf.toString();
 }
@@ -338,7 +340,7 @@ Future<void> openForumLink(BuildContext context, String href) async {
 /// - 命中 → 立刻 `prevent`（别让网页再加载一遍帖页）；下一帧关掉网页壳、回调调用方刷新原帖；
 /// - 其余链接（表单页里的普通链接 / 游客点的登录页）→ 交回 [_routeNative]。
 ///
-/// [pid] 传了 = 回复某一楼（`reppost`）；不传 = 主题级回复。
+/// [pid] 传了 = 回复某一楼（`repquote`）；不传 = 主题级回复。
 /// [onSubmitted] 拿到的是「服务端给的楼层 pid」，拿不到就是空串（能跳就跳，不能就只刷新）。
 Future<void> openForumReplyPage(
   BuildContext context, {
