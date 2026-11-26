@@ -28,6 +28,7 @@ class YmForumPostCard extends StatelessWidget {
     this.onOpenPoll,
     this.onOpenImage,
     this.onOpenLink,
+    this.onTapAuthor,
   });
 
   final ForumPost post;
@@ -58,6 +59,12 @@ class YmForumPostCard extends StatelessWidget {
   /// null = 链接按纯文字渲染，不可点。
   final void Function(String href)? onOpenLink;
 
+  /// 点作者行（头像 + 昵称）进资料页。
+  ///
+  /// **可空**：作者 uid 拿不到时传 null，那一行就只是文字，不可点——
+  /// 布局一字未改（只把头像与昵称那一段包进按压件）。
+  final VoidCallback? onTapAuthor;
+
   @override
   Widget build(BuildContext context) {
     final c = YmScope.of(context).colors;
@@ -80,36 +87,56 @@ class YmForumPostCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              YmForumImage(
-                url: _avatarUrl(post.authorUid),
-                width: 32,
-                height: 32,
-                fallbackText: post.author.isEmpty ? '楼' : post.author.characters.first,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              const SizedBox(width: 9),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      post.author,
-                      style: TextStyle(
-                        fontSize: YmFont.sub13,
-                        fontWeight: FontWeight.w700,
-                        color: c.text,
+                child: YmPressable(
+                  kind: YmPressKind.dim,
+                  dimOpacity: 0.6,
+                  radius: BorderRadius.circular(YmRadius.chip),
+                  onTap: onTapAuthor,
+                  // 不可点时连按压反馈都不给：否则点了会有「按了没事」的错觉
+                  enabled: onTapAuthor != null,
+                  semanticLabel:
+                      onTapAuthor == null ? null : '查看 ${post.author} 的资料',
+                  child: Row(
+                    children: [
+                      YmForumImage(
+                        url: _avatarUrl(post.authorUid),
+                        width: 32,
+                        height: 32,
+                        fallbackText:
+                            post.author.isEmpty ? '楼' : post.author.characters.first,
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (post.time.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        post.time,
-                        style: TextStyle(fontSize: YmFont.micro11, color: c.text3),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              post.author,
+                              style: TextStyle(
+                                fontSize: YmFont.sub13,
+                                fontWeight: FontWeight.w700,
+                                color: c.text,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (post.time.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                post.time,
+                                style: TextStyle(
+                                  fontSize: YmFont.micro11,
+                                  color: c.text3,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
                     ],
-                  ],
+                  ),
                 ),
               ),
               Text(

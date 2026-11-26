@@ -26,6 +26,8 @@
 !/test/download_foreground_test.dart
 !/test/forum_body_scale_test.dart
 !/test/forum_color_test.dart
+!/test/forum_profile_page_test.dart
+!/test/forum_profile_parse_test.dart
 !/test/forum_rate_test.dart
 !/test/forum_track_test.dart
 !/test/forum_viewer_test.dart

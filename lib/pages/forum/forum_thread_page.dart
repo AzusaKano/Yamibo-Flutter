@@ -43,6 +43,7 @@ import '../../design/widgets/top_bar.dart';
 import '../../design/ym_route.dart';
 import '../routes.dart';
 import 'forum_login_page.dart' show ForumLoginPage;
+import 'forum_profile_page.dart' show ForumProfilePage;
 import 'forum_web.dart'
     show
         forumThreadWebPath,
@@ -1067,6 +1068,12 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
               enabled: _jumpFloors.length > 1,
               onTap: _openFloorJump,
             ),
+            // 楼主资料：只有在「只看楼主」里才知道楼主 uid，其余时候不占位
+            if (_opUid.isNotEmpty)
+              YmMenuItemData(
+                label: '查看楼主资料',
+                onTap: () => ymPush(context, ForumProfilePage(uid: _opUid)),
+              ),
           ],
           separatorAfter: true,
         ),
@@ -1364,6 +1371,12 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
                     onOpenPoll: () => _openPollWeb(post),
                     onOpenImage: _openImage,
                     onOpenLink: _openLink,
+                    onTapAuthor: post.authorUid.isEmpty
+                        ? null
+                        : () => ymPush(
+                              context,
+                              ForumProfilePage(uid: post.authorUid),
+                            ),
                   ),
                 // 单页帖（总页数 = 1）不出任何「加载更多」件：按钮挂上去
                 // 只会诱发越界请求（站点原样回末页内容，0.1.23 实测）
@@ -1402,6 +1415,12 @@ class _ForumThreadPageState extends State<ForumThreadPage> {
                             onOpenPoll: () => _openPollWeb(post),
                             onOpenImage: _openImage,
                             onOpenLink: _openLink,
+                            onTapAuthor: post.authorUid.isEmpty
+                                ? null
+                                : () => ymPush(
+                                      context,
+                                      ForumProfilePage(uid: post.authorUid),
+                                    ),
                           ),
                     ],
                   ),

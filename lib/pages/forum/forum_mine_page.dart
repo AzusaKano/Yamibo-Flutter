@@ -4,6 +4,7 @@ import '../../data/forum/forum_auth.dart';
 import '../../data/forum/forum_track.dart';
 import '../../design/theme.dart';
 import '../../design/tokens.dart';
+import '../../design/pressable.dart';
 import '../../design/widgets/button.dart';
 import '../../design/widgets/forum/forum_image.dart';
 import '../../design/widgets/lists.dart' show YmCardList;
@@ -14,6 +15,7 @@ import '../../design/widgets/top_bar.dart';
 import '../../design/ym_route.dart';
 import 'forum_history_page.dart' show ForumHistoryPage;
 import 'forum_login_page.dart';
+import 'forum_profile_page.dart' show ForumProfilePage;
 import 'forum_web.dart';
 import '../routes.dart' show ymPush;
 
@@ -74,6 +76,10 @@ class _ForumMinePageState extends State<ForumMinePage> {
                     _AccountCard(
                       account: acc,
                       onLogin: _openLogin,
+                      // 已登录才可点：未登录时那张卡上的动作是「登录论坛」按钮
+                      onTap: acc.loggedIn
+                          ? () => ymPush(context, const ForumProfilePage())
+                          : null,
                     ),
                     const SizedBox(height: 14),
                     _SignCard(
@@ -96,6 +102,13 @@ class _ForumMinePageState extends State<ForumMinePage> {
                                   ymPush(context, const ForumHistoryPage()),
                             );
                           },
+                        ),
+                        YmActionRow(
+                          title: '我的空间',
+                          value: acc.loggedIn ? '个人资料' : '登录后可用',
+                          onTap: acc.loggedIn
+                              ? () => ymPush(context, const ForumProfilePage())
+                              : null,
                         ),
                         YmActionRow(
                           title: '我的收藏',
@@ -135,61 +148,69 @@ class _ForumMinePageState extends State<ForumMinePage> {
 /// 账号卡（草稿 `yf-me`）：头像 34（顶栏动作圆同档升 42 不适用卡内，卡内头像 34
 /// 与草稿一致）+ 名字 + UID + 主按钮。
 class _AccountCard extends StatelessWidget {
-  const _AccountCard({required this.account, required this.onLogin});
+  const _AccountCard({required this.account, required this.onLogin, this.onTap});
 
   final ForumAccount account;
   final VoidCallback onLogin;
+
+  /// 点整张卡进自己的资料页（未登录时为空 = 不可点）。
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final c = YmScope.of(context).colors;
     final loggedIn = account.loggedIn;
     final name = loggedIn ? (account.name.isNotEmpty ? account.name : '已登录') : '未登录论坛';
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(YmRadius.box),
-        boxShadow: YmShadows.card,
-      ),
-      child: Row(
-        children: [
-          YmForumImage(
-            url: loggedIn ? forumAvatarUrl(account.uid) : '',
-            width: 34,
-            height: 34,
-            fallbackText: loggedIn ? name.characters.first : '论',
-            borderRadius: BorderRadius.circular(17),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: TextStyle(
-                    fontSize: YmFont.strong16,
-                    fontWeight: FontWeight.w800,
-                    color: c.text,
-                  ),
-                ),
-                if (loggedIn && account.uid.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    'UID ${account.uid}',
-                    style: TextStyle(fontSize: YmFont.small12, color: c.text3),
-                  ),
-                ],
-              ],
+    // 底色 / 圆角 / 投影都挂在按压件上（不再套一层带装饰的 Container）：
+    // 这样按下时的底色变化看得见，外观与原来逐字一致。
+    return YmPressable(
+      kind: YmPressKind.row,
+      baseColor: c.card,
+      radius: BorderRadius.circular(YmRadius.box),
+      boxShadow: YmShadows.card,
+      onTap: onTap,
+      enabled: onTap != null,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            YmForumImage(
+              url: loggedIn ? forumAvatarUrl(account.uid) : '',
+              width: 34,
+              height: 34,
+              fallbackText: loggedIn ? name.characters.first : '论',
+              borderRadius: BorderRadius.circular(17),
             ),
-          ),
-          YmButton(
-            label: loggedIn ? '已登录' : '登录论坛',
-            kind: loggedIn ? YmButtonKind.tint : YmButtonKind.primary,
-            onTap: loggedIn ? null : onLogin,
-          ),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: TextStyle(
+                      fontSize: YmFont.strong16,
+                      fontWeight: FontWeight.w800,
+                      color: c.text,
+                    ),
+                  ),
+                  if (loggedIn && account.uid.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'UID ${account.uid}',
+                      style: TextStyle(fontSize: YmFont.small12, color: c.text3),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            YmButton(
+              label: loggedIn ? '已登录' : '登录论坛',
+              kind: loggedIn ? YmButtonKind.tint : YmButtonKind.primary,
+              onTap: loggedIn ? null : onLogin,
+            ),
+          ],
+        ),
       ),
     );
   }

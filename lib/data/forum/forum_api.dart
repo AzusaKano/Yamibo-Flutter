@@ -10,10 +10,12 @@ import 'dart:typed_data' show Uint8List;
 import '../cache/image_bytes.dart';
 import '../cache/ym_cache_store.dart' show YmCache, YmForumPageFp;
 import '../http.dart' show YmHttpError;
+import 'forum_auth.dart' show ForumSession;
 import 'forum_fingerprint.dart';
 import 'forum_http.dart';
 import 'forum_models.dart';
 import 'forum_parser.dart';
+import 'forum_user.dart';
 
 /// 站方消息兜底（2026-11-15 定调）：解析认不出任何已知内容（无板块/无楼层/无列表）
 /// + 页面命中 Discuz showmessage 消息页形状 → 抛 SITE_MESSAGE、摘站点提示原文
@@ -393,4 +395,66 @@ Future<ForumFindpostTarget> resolveFindpost(String pid) async {
     throw YmHttpError('没能找到那一楼', code: 'HTTP');
   }
   return ForumFindpostTarget(tid: tid, page: page ?? 1, pid: pid);
+}
+
+/* ------------------------------ 个人资料 ------------------------------ */
+
+/// 资料页的进程内缓存：是**别人**的资料、积分会变，所以不落盘；
+/// 上限 12 条，超出挤掉最久没用过的那条（自己回看几个人够用，不做常驻）。
+final Map<String, ForumProfile> _profileCache = <String, ForumProfile>{};
+const int _profileCacheLimit = 12;
+
+/// 页面要用的 uid：传了就用传的，没传就是我自己（登录态里的 uid）。
+String _profileTarget(String uid) =>
+    uid.isNotEmpty ? uid : ForumSession.account.value.uid;
+
+/// 一个人的资料页。[uid] 空 = 我自己。
+///
+/// 失败口径：未登录时站点 302 跳登录，由通道抛 `LOGIN_REQUIRED`；
+/// 「用户空间不存在」是 200 的消息页，解析认不出结构后走 `SITE_MESSAGE`
+/// 把站点原文透传上去；其余认不出结构的情况是 `PARSE`。
+Future<ForumProfile> fetchForumProfile({String uid = ''}) async {
+  final target = _profileTarget(uid);
+  final key = target.isNotEmpty ? target : 'self';
+  final cached = _profileCache.remove(key);
+  if (cached != null) {
+    _profileCache[key] = cached; // 命中就算用过一次：挪到队尾
+    return cached;
+  }
+
+  final query = target.isEmpty ? '' : '&uid=$target';
+  final res = await ForumHttp.instance.request(
+    '/home.php?mod=space$query&mycenter=1&mobile=2',
+  );
+
+  ForumProfile? parsed;
+  try {
+    parsed = parseUserProfile(res.body, uid: target);
+  } catch (_) {
+    // 先看是不是站方的消息页（「用户空间不存在」也是 200），不是再原样上抛
+    _throwIfSiteMessage(res.body, nothingRecognized: true);
+    rethrow;
+  }
+
+  _profileCache[key] = parsed;
+  while (_profileCache.length > _profileCacheLimit) {
+    _profileCache.remove(_profileCache.keys.first);
+  }
+  return parsed;
+}
+
+/// 某人「发表的主题」第一页（站点自己分页，本页十几条）。
+///
+/// 与板块页共用同一套行解析：空间页的主题列表行与 `forumdisplay` 同构
+/// （`li.list` + `threadlist_top/tit/mes/foot`），只取 `threads`，
+/// 不取空间页上那个「甲用户 - Ta的主题」标题当板块名。
+Future<List<ForumThreadSummary>> fetchForumProfileThreads(String uid) async {
+  final target = _profileTarget(uid);
+  final query = target.isEmpty ? '' : '&uid=$target';
+  final res = await ForumHttp.instance.request(
+    '/home.php?mod=space$query&do=thread&view=me&order=dateline&mobile=2',
+  );
+  final data = parseBoardPage(res.body, fid: '', page: 1);
+  _throwIfSiteMessage(res.body, nothingRecognized: data.threads.isEmpty);
+  return data.threads;
 }

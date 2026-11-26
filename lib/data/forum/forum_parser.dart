@@ -11,7 +11,9 @@ library;
 
 import 'dart:ui' show TextAlign;
 
+import '../http.dart' show YmHttpError;
 import 'forum_models.dart';
+import 'forum_user.dart';
 
 const String _site = 'https://bbs.yamibo.com';
 
@@ -1313,4 +1315,188 @@ ForumThreadSummary? _parseThread(String block) {
     views: views,
     replies: replies,
   );
+}
+
+// ---------------------------------------------------------------------------
+// 用户资料页（home.php?mod=space&mycenter=1&mobile=2 · 第十七期）
+// ---------------------------------------------------------------------------
+
+/// 昵称：`<h2 class="name">…</h2>`（头卡里那一个，不在 myinfo_list 里）。
+final _profileNameRe = RegExp(r'<h2 class="name">([\s\S]*?)</h2>');
+
+/// 三格的一格：`<li><span>值</span>标签</li>`——**值在标签前**。
+final _userBoxCellRe =
+    RegExp(r'<li[^>]*>\s*<span[^>]*>([\s\S]*?)</span>([\s\S]*?)</li>');
+
+/// 一行资料：`<li>标签<span>值</span></li>`——**值在标签后**。
+final _profileCellRe = RegExp(r'<span[^>]*>([\s\S]*?)</span>');
+
+/// 资料页解析。`uid` 是请求时带的 uid，只在页面里没印 UID 行时兜底。
+///
+/// ⚠ 页面上有**两套顺序相反**的结构，必须分开写，别想着合并：
+/// - 三格（`div.user_box`）：`<li><span>值</span>标签</li>`，**值在标签前**；
+/// - 资料行（`div.myinfo_list`）：`<li>标签<span>值</span></li>`，**值在标签后**。
+/// 写反了就是「标签当值」，而且页面上看起来还挺像那么回事。
+///
+/// 切块口径同列表行：按「下一个 `<li` 起点」切，不用懒匹配 `</li>`
+/// （`li.sig` 里有 `<br>` 和链接，两种匹配都会踩边界）。
+///
+/// 名字与资料行**都**取不到 = 这不是资料页（消息页 / 模板改版），抛 `PARSE`
+/// 交给取数层翻成人话；只缺一两行不算，缺的行就是不出现。
+ForumProfile parseUserProfile(String html, {String uid = ''}) {
+  final name = stripTags(_first(html, _profileNameRe) ?? '');
+
+  // 三格：值在标签前
+  int? totalPoints;
+  int? points;
+  int? partner;
+  final boxAt = html.indexOf('<div class="user_box cl">');
+  if (boxAt >= 0) {
+    final closeAt = html.indexOf('</ul>', boxAt);
+    final chunk = html.substring(boxAt, closeAt < 0 ? html.length : closeAt);
+    for (final m in _all(chunk, _userBoxCellRe)) {
+      final label = stripTags(m.group(2) ?? '');
+      final n = _profileInt(stripTags(m.group(1) ?? ''));
+      switch (label) {
+        case '总积分':
+          totalPoints = n;
+        case '积分':
+          points = n;
+        case '对象':
+          partner = n;
+      }
+    }
+  }
+
+  // 签名：单独占一个 myinfo_list 块，`<br>` 转换行（本期不做富文本）
+  var signature = '';
+  final sigAt = html.indexOf('<li class="sig">');
+  if (sigAt >= 0) {
+    final bodyAt = html.indexOf('>', sigAt) + 1;
+    final end = _firstPositive([
+      html.indexOf('<li', bodyAt),
+      html.indexOf('</ul>', bodyAt),
+      html.length,
+    ]);
+    if (bodyAt > 0 && end > bodyAt) {
+      signature = blockText(html.substring(bodyAt, end));
+    }
+  }
+
+  // 资料行：遍历**所有** myinfo_list 块（他人视角有两个：签名块 + 资料块）
+  final fields = <ForumProfileField>[];
+  var group = '';
+  var adminGroup = '';
+  var registerTime = '';
+  var lastVisit = '';
+  int? onlineHours;
+  var parsedUid = '';
+  var settingsRow = false;
+
+  var from = 0;
+  while (true) {
+    final start = html.indexOf('<div class="myinfo_list cl"', from);
+    if (start < 0) break;
+    final next = html.indexOf('<div class="myinfo_list', start + 1);
+    final end = next < 0 ? html.length : next;
+    for (final row in _profileRows(html.substring(start, end))) {
+      // 签名那一条已经单独取过，别当资料行
+      if (row.contains('class="sig"')) continue;
+      final cell = _profileCellRe.firstMatch(row);
+      // 没有 `<span>` = 标题行（`<b>个人资料</b>` / `<b>个人签名</b>` 那一类）
+      if (cell == null) continue;
+      final label = stripTags(row.substring(0, cell.start));
+      if (label.isEmpty) continue;
+      // 自己视角的表头行是 `<b>个人资料</b><span><a>设置</a></span>`：
+      // 它的「值」是动作而不是资料，但要拿来判 isSelf
+      if (label == '个人资料' || label == '个人签名') {
+        if (stripTags(cell.group(1) ?? '').contains('设置')) settingsRow = true;
+        continue;
+      }
+      final value = _profileValue(stripTags(cell.group(1) ?? ''));
+      if (value == null) continue;
+      switch (label) {
+        case '用户组':
+          group = value;
+        case '管理组':
+          adminGroup = value;
+        // 最后访问归头卡，资料表里不再重复同一件事实
+        case '最后访问':
+          lastVisit = value;
+        case 'UID':
+          parsedUid = value;
+          fields.add(ForumProfileField(label: label, value: value));
+        case '在线时间':
+          onlineHours = _profileInt(value);
+          fields.add(ForumProfileField(label: label, value: value));
+        case '注册时间':
+          registerTime = value;
+          fields.add(ForumProfileField(label: label, value: value));
+        default:
+          fields.add(ForumProfileField(label: label, value: value));
+      }
+    }
+    if (end >= html.length) break;
+    from = end;
+  }
+
+  if (name.isEmpty && fields.isEmpty) {
+    throw YmHttpError('没能认出资料页', code: 'PARSE');
+  }
+
+  return ForumProfile(
+    uid: parsedUid.isNotEmpty ? parsedUid : uid,
+    name: name,
+    group: group,
+    adminGroup: adminGroup,
+    signature: signature,
+    formhash: formhash(html),
+    registerTime: registerTime,
+    lastVisit: lastVisit,
+    totalPoints: totalPoints,
+    points: points,
+    partner: partner,
+    onlineHours: onlineHours,
+    fields: fields,
+    isSelf: settingsRow || html.contains('btn_exit'),
+  );
+}
+
+/// 一个 myinfo_list 块里的所有 `<li>` 段（按下一个 `<li` 起点切）。
+List<String> _profileRows(String block) {
+  final starts = _all(block, RegExp(r'<li[ >]')).toList();
+  final out = <String>[];
+  for (var i = 0; i < starts.length; i++) {
+    final from = starts[i].start;
+    final to = i + 1 < starts.length ? starts[i + 1].start : block.length;
+    if (to > from) out.add(block.substring(from, to));
+  }
+  return out;
+}
+
+/// 资料值归一：空串 / `-` / 默认的裸协议头一律当「站点没给」。
+/// 归一后是 null 的行整行不出现（不印占位符）。
+String? _profileValue(String raw) {
+  final v = raw.trim();
+  if (v.isEmpty || v == '-' || v == '--' || v == '—') return null;
+  // Discuz 的「没填」默认值就是一个空协议头（个人主页这类字段）
+  if (v == 'http://' || v == 'https://') return null;
+  return v;
+}
+
+/// 只留数字：`12000 点` → 12000、`9358 小时` → 9358。没有数字就是 null。
+int? _profileInt(String raw) {
+  final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+  if (digits.isEmpty) return null;
+  return int.tryParse(digits);
+}
+
+/// 一组下标里最小且非负的那个（`indexOf` 找不到时是 -1）。
+int _firstPositive(List<int> values) {
+  var best = -1;
+  for (final v in values) {
+    if (v < 0) continue;
+    if (best < 0 || v < best) best = v;
+  }
+  return best;
 }
