@@ -3,6 +3,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../data/forum/forum_http.dart' show ForumHttp;
 import '../design/app_version.dart';
+import '../design/licenses/gpl3.dart';
 import '../design/pressable.dart';
 import '../design/theme.dart';
 import '../design/tokens.dart';
@@ -90,6 +91,24 @@ class AboutPage extends StatelessWidget {
                       _line(c, '本应用为百合会（yamibo.com）的非官方阅读客户端。'),
                       const SizedBox(height: 8),
                       _line(c, '作品、封面与章节内容的一切权利归原作者与论坛所有。'),
+                      const SizedBox(height: 8),
+                      // 本应用自身的许可：点开看 GPL 全文。用强调色表示可点，
+                      // 不再另起一行提示文字。
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: YmPressable(
+                          kind: YmPressKind.dim,
+                          onTap: () => _showLicense(context, _selfLicense),
+                          child: Text(
+                            '本应用以 GNU General Public License v3.0 授权。',
+                            style: TextStyle(
+                              fontSize: YmFont.small12,
+                              height: 1.7,
+                              color: c.accentInk,
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -299,9 +318,18 @@ class _MetricRow extends StatelessWidget {
 
 /// 开源组件条目：名称 / 版权行 / 许可证 / 全文。全文**逐字**取自各项目随附的
 /// LICENSE（pub 缓存与 Flutter SDK 实抓，2026-11-22），不转写不改写——
-/// BSD / MIT 二进制分发须随附原文。顺序 = 对这个 App 的「引用层级」：
-/// 设计系统最先，框架其次，直接依赖按 pubspec 顺序。
+/// GPL / BSD / MIT 二进制分发须随附原文。顺序 = 对这个 App 的「引用层级」：
+/// 自身许可最先，设计系统其次，框架再次，直接依赖按 pubspec 顺序。
 typedef _OssEntry = ({String name, String copyright, String license, String text});
+
+/// 本应用自身的许可。它不属于「基于以下开源项目构建」的清单，
+/// 但二进制分发须随附全文（GPL-3.0 §6），所以单独持有、供入口引用。
+const _OssEntry _selfLicense = (
+  name: 'Yamibo-Flutter',
+  copyright: 'Copyright (c) 2026 AzusaKano',
+  license: 'GPL-3.0-only',
+  text: kGpl3License,
+);
 
 const List<_OssEntry> _ossProjects = [
   (

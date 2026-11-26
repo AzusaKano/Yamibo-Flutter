@@ -28,8 +28,10 @@ flutter build apk --release --split-per-abi
 
 ## 许可
 
-BSD-3-Clause，全文见 `LICENSE`。
+GNU General Public License v3.0（`GPL-3.0-only`），全文见 `LICENSE`。
 
-界面派生自 RTGo 设计系统，其组件版权声明与许可见 `NOTICE.md`。
+你可以使用、修改、再分发本项目；分发衍生版本时须同样以 GPL-3.0 开放源代码。
+
+界面派生自 RTGo 设计系统（BSD-3-Clause），其组件版权声明与许可见 `NOTICE.md`。
 
 帖子、漫画、小说、图片及其他内容归原作者或相应权利人所有，使用时请遵守站点规则。
