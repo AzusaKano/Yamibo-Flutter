@@ -14,6 +14,40 @@
 !/assets/
 !/android/
 
+# 测试：只放行「应用自身自洽」的那批，逐文件点名。
+# 下面 /test/* 先把整个目录关掉，再逐个打开；样本目录
+# （test/samples、test/fixtures）与任何新加的测试文件默认都不公开。
+!/test/
+/test/*
+!/test/about_license_test.dart
+!/test/cache_store_test.dart
+!/test/card_list_layout_test.dart
+!/test/cn_test.dart
+!/test/download_foreground_test.dart
+!/test/forum_body_scale_test.dart
+!/test/forum_color_test.dart
+!/test/forum_rate_test.dart
+!/test/forum_track_test.dart
+!/test/forum_viewer_test.dart
+!/test/hscroll_fade_test.dart
+!/test/library_test.dart
+!/test/list_select_test.dart
+!/test/manga_cache_test.dart
+!/test/offline_page_test.dart
+!/test/reader_page_slider_test.dart
+!/test/reader_restore_test.dart
+!/test/reader_shell_test.dart
+!/test/session_test.dart
+!/test/shelf_cover_test.dart
+!/test/sheet_motion_test.dart
+!/test/text_menu_localization_test.dart
+!/test/text_scale_test.dart
+!/test/theme_prefs_test.dart
+!/test/toast_test.dart
+!/test/type_weight_test.dart
+!/test/typography_test.dart
+!/test/ym_route_test.dart
+
 # 显式排除（即使父目录已放行）
 /android/build/
 /android/.gradle/
