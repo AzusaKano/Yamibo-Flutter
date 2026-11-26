@@ -200,6 +200,40 @@ void main() {
     expect(find.text('重试'), findsOneWidget);
   });
 
+  testWidgets('站点 302 规范化资料页地址：跟一跳继续取，不误报未登录', (tester) async {
+    // 真实站点：`…&uid=N&mycenter=1&mobile=2` → 302 `…&uid=N&do=profile&mobile=2`
+    // 通道层把没带 redirectOk 的 3xx 当未登录，所以取数层必须自己跟这一跳
+    final calls = <String>[];
+    ForumHttp.debugHandler = (url) async {
+      calls.add(url);
+      if (url.contains('do=profile')) {
+        return ForumRawResponse(status: 200, body: profileHtml());
+      }
+      return ForumRawResponse(
+        status: 302,
+        body: '',
+        location: 'home.php?mod=space&uid=888888&do=profile&mobile=2',
+      );
+    };
+    await pump(tester, const ForumProfilePage(uid: '888888'));
+
+    expect(find.text('登录后使用'), findsNothing);
+    expect(find.text('甲用户'), findsWidgets);
+    expect(calls.length, greaterThanOrEqualTo(2));
+    expect(calls.any((u) => u.contains('do=profile')), isTrue);
+  });
+
+  testWidgets('302 跳去登录页才是真的没登录', (tester) async {
+    ForumHttp.debugHandler = (url) async => ForumRawResponse(
+      status: 302,
+      body: '',
+      location: 'member.php?mod=logging&action=login&mobile=2',
+    );
+    await pump(tester, const ForumProfilePage(uid: '666666'));
+
+    expect(find.text('登录后使用'), findsOneWidget);
+  });
+
   testWidgets('楼层卡作者行：有 uid 可点，无 uid 不可点', (tester) async {
     var taps = 0;
     ForumPost post(String uid) => ForumPost(

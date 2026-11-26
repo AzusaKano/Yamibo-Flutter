@@ -408,9 +408,42 @@ const int _profileCacheLimit = 12;
 String _profileTarget(String uid) =>
     uid.isNotEmpty ? uid : ForumSession.account.value.uid;
 
+/// 取空间页原文，自己跟一跳 302。
+///
+/// 站点对「只有 `mycenter=1`、没有 `do=profile`」的地址会先回 302 规范化
+/// （`…&uid=N&mycenter=1&mobile=2` → `…&uid=N&do=profile&mobile=2`，`mycenter` 被丢掉），
+/// 通道层把「没带 redirectOk 的 3xx」一律当未登录，直接请求这个地址就会
+/// 已登录也报「需要登录」。所以这里显式允许 302 并跟一跳：
+/// 跳到 `member.php?mod=logging` 才是真的没登录，跳到别的站内地址就继续取。
+Future<String> _fetchSpaceHtml(String path) async {
+  var target = path;
+  for (var hop = 0; hop < 3; hop++) {
+    final res = await ForumHttp.instance.request(target, redirectOk: true);
+    final loc = res.location ?? '';
+    if (loc.isEmpty) return res.body;
+    if (loc.contains('mod=logging')) {
+      throw YmHttpError('需要登录后才能使用', code: 'LOGIN_REQUIRED');
+    }
+    target = _sitePathOf(loc);
+    if (target.isEmpty) break;
+  }
+  throw YmHttpError('没能打开这个空间', code: 'HTTP');
+}
+
+/// `Location` → 站内路径（相对地址原样补 `/`，绝对地址只留 path + query）。
+String _sitePathOf(String location) {
+  if (location.isEmpty) return '';
+  if (location.startsWith('http://') || location.startsWith('https://')) {
+    final host = location.indexOf('//') + 2;
+    final slash = location.indexOf('/', host);
+    return slash < 0 ? '' : location.substring(slash);
+  }
+  return location.startsWith('/') ? location : '/$location';
+}
+
 /// 一个人的资料页。[uid] 空 = 我自己。
 ///
-/// 失败口径：未登录时站点 302 跳登录，由通道抛 `LOGIN_REQUIRED`；
+/// 失败口径：未登录时站点 302 跳登录（见 [_fetchSpaceHtml]），抛 `LOGIN_REQUIRED`；
 /// 「用户空间不存在」是 200 的消息页，解析认不出结构后走 `SITE_MESSAGE`
 /// 把站点原文透传上去；其余认不出结构的情况是 `PARSE`。
 Future<ForumProfile> fetchForumProfile({String uid = ''}) async {
@@ -423,16 +456,14 @@ Future<ForumProfile> fetchForumProfile({String uid = ''}) async {
   }
 
   final query = target.isEmpty ? '' : '&uid=$target';
-  final res = await ForumHttp.instance.request(
-    '/home.php?mod=space$query&mycenter=1&mobile=2',
-  );
+  final html = await _fetchSpaceHtml('/home.php?mod=space$query&mycenter=1&mobile=2');
 
   ForumProfile? parsed;
   try {
-    parsed = parseUserProfile(res.body, uid: target);
+    parsed = parseUserProfile(html, uid: target);
   } catch (_) {
     // 先看是不是站方的消息页（「用户空间不存在」也是 200），不是再原样上抛
-    _throwIfSiteMessage(res.body, nothingRecognized: true);
+    _throwIfSiteMessage(html, nothingRecognized: true);
     rethrow;
   }
 
@@ -451,10 +482,10 @@ Future<ForumProfile> fetchForumProfile({String uid = ''}) async {
 Future<List<ForumThreadSummary>> fetchForumProfileThreads(String uid) async {
   final target = _profileTarget(uid);
   final query = target.isEmpty ? '' : '&uid=$target';
-  final res = await ForumHttp.instance.request(
+  final html = await _fetchSpaceHtml(
     '/home.php?mod=space$query&do=thread&view=me&order=dateline&mobile=2',
   );
-  final data = parseBoardPage(res.body, fid: '', page: 1);
-  _throwIfSiteMessage(res.body, nothingRecognized: data.threads.isEmpty);
+  final data = parseBoardPage(html, fid: '', page: 1);
+  _throwIfSiteMessage(html, nothingRecognized: data.threads.isEmpty);
   return data.threads;
 }

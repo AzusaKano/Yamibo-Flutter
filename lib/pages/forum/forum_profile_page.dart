@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/forum/forum_api.dart';
+import '../../data/forum/forum_auth.dart' show ForumSession;
 import '../../data/forum/forum_models.dart';
 import '../../data/forum/forum_user.dart';
 import '../../design/pressable.dart';
@@ -110,7 +111,12 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
         YmForumProfileHead(profile: p),
         if (stats != null) ...[const SizedBox(height: 14), stats],
         const SizedBox(height: 14),
-        _buildActions(context, p, hasThreads: data.threads.isNotEmpty),
+        _buildActions(
+          context,
+          p,
+          self: _isSelf(p),
+          hasThreads: data.threads.isNotEmpty,
+        ),
         if (p.signature.isNotEmpty) ...[
           const SizedBox(height: 14),
           _SignatureCard(text: p.signature),
@@ -121,11 +127,18 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
         ],
         if (data.threads.isNotEmpty) ...[
           const SizedBox(height: 14),
-          _buildThreads(context, p, data.threads),
+          _buildThreads(context, p, self: _isSelf(p), threads: data.threads),
         ],
       ],
     );
   }
+
+  /// 是不是「我自己」：页面自己印了 `设置` / `btn_exit` 就算，
+  /// 另外 uid 与登录态一致也算——站点对 `mycenter=1` 会给 302 把参数丢掉，
+  /// 自视角那一页不一定还带着这两个标记，只靠页面标记会把自己的页认成别人的。
+  bool _isSelf(ForumProfile p) =>
+      p.isSelf ||
+      (p.uid.isNotEmpty && p.uid == ForumSession.account.value.uid);
 
   /// 三格：总积分 / 积分 / 对象。站点把「值」印在标签前，缺格整格不画——
   /// 一格都没有就整条不出现（不画空卡）。
@@ -179,12 +192,13 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
   Widget _buildActions(
     BuildContext context,
     ForumProfile p, {
+    required bool self,
     required bool hasThreads,
   }) {
     final c = YmScope.of(context).colors;
     final uid = p.uid;
     final actions = <(String, VoidCallback?)>[];
-    if (p.isSelf) {
+    if (self) {
       actions.add((
         '设置资料',
         () => _openWeb('/home.php?mod=spacecp&mobile=2', '设置资料'),
@@ -286,9 +300,10 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
   /// TA 的主题：首屏 10 条，点行进原生帖子页（与板块页同一入口）。
   Widget _buildThreads(
     BuildContext context,
-    ForumProfile p,
-    List<ForumThreadSummary> threads,
-  ) {
+    ForumProfile p, {
+    required bool self,
+    required List<ForumThreadSummary> threads,
+  }) {
     final c = YmScope.of(context).colors;
     return Column(
       key: _threadsKey,
@@ -297,7 +312,7 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
         Padding(
           padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
           child: Text(
-            p.isSelf ? '我的主题' : 'TA 的主题',
+            self ? '我的主题' : 'TA 的主题',
             style: TextStyle(
               fontSize: YmFont.body15,
               fontWeight: FontWeight.w700,
