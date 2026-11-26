@@ -103,13 +103,13 @@ class _ForumMinePageState extends State<ForumMinePage> {
                             );
                           },
                         ),
-                        YmActionRow(
-                          title: '我的空间',
-                          value: acc.loggedIn ? '个人资料' : '登录后可用',
-                          onTap: acc.loggedIn
-                              ? () => ymPush(context, const ForumProfilePage())
-                              : null,
-                        ),
+                        if (acc.loggedIn)
+                          YmActionRow(
+                            title: '我的空间',
+                            value: '个人资料',
+                            onTap: () =>
+                                ymPush(context, const ForumProfilePage()),
+                          ),
                         YmActionRow(
                           title: '我的收藏',
                           value: acc.loggedIn ? '收藏的帖子' : '登录后可用',
