@@ -11,8 +11,11 @@ import 'forum_image.dart' show YmForumImage, forumAvatarUrl;
 /// 所以不取页面图：用品牌色块 + 一点低透明度装饰圆给层次，取不到的是图不画，
 /// 不是拿别的东西冒充。
 ///
-/// 圆角取**页内块档** [YmRadius.box]（16）：它和同页的三格条、动作格、签名卡、
-/// 资料表是同一层级，同屏同层级必须同档（24 是「浮起卡」档，留给弹层/摘要卡）。
+/// 圆角取**大档** [YmRadius.card]（24）：这是 2026-11-27 用户真机确认后明确要求的
+/// **单点例外**——头卡是全页最上、最大的一块，视觉上更像「页首主视觉」而不是
+/// 页内平铺块，取大档才压得住下面那几张 16 的同层卡。所以同页的三格条、动作格、
+/// 签名卡、资料表仍是 [YmRadius.box]（16），**只头卡是 24**；不要为了「统一」把
+/// 下面几张也拉到 24，也不要反向把这一处判回 16。登记见 `docs/forum-components.md` F-22。
 ///
 /// 头像不信页面给的 `_avatar_middle`（120px，铺到 64pt×3x 会糊）：
 /// 自己按 uid 拼 `_avatar_big`（200px）。
@@ -28,7 +31,7 @@ class YmForumProfileHead extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: c.brand,
-        borderRadius: BorderRadius.circular(YmRadius.box),
+        borderRadius: BorderRadius.circular(YmRadius.card),
       ),
       child: Stack(
         children: [
