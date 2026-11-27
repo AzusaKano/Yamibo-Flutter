@@ -1,7 +1,7 @@
 name: yamibo_flutter
 description: "百合会第三方客户端（非官方）· Flutter"
 publish_to: 'none'
-version: 0.1.55+2080
+version: 0.1.56+2081
 
 environment:
   sdk: ^3.13.5
