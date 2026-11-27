@@ -62,9 +62,6 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
   String? _moreError;
   String? _moreErrorCode;
 
-  /// 这一次滚动是不是用户手拖出来的（只有手拖才判触底续载）。
-  bool _userDragging = false;
-
   /// 当前 bundle 的身份：换了一份（登录回来重取）就把追加态清空。
   _ProfileBundle? _seen;
   String _threadsUid = '';
@@ -133,28 +130,15 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
 
   /* ------------------------------ 续载 ------------------------------ */
 
-  /// 触底续载：只认**用户手拖**出来的滚动。
+  /// 触底续载：与帖子页（`forum_thread_page.dart`）**同一套**判定，别自创。
   ///
-  /// 与帖子页同一套阈值与方向口径，但多判了一处：
-  /// `UserScrollNotification` 只在手势**起手**那一下发（那时 offset 还接近 0），
-  /// 照它判的话"一次性拖到底"这一下不会触发，得再拖第二下才续载。
-  /// 所以额外在手势期间（`ScrollStartNotification` 带 `dragDetails`）跟着
-  /// `ScrollUpdateNotification` 判一次；程序化滚动（`ensureVisible` 之类）
-  /// 没有 `dragDetails`，照样不会触发首屏连环加载。
+  /// 只认 `UserScrollNotification`（程序化滚动恒 idle，用它才不会首屏连环触发），
+  /// 方向 `reverse`（⚠ 枚举与直觉相反：reverse = 往列表深处滚），
+  /// 且距底不足 [_loadMoreThreshold]。
   bool _onScroll(ScrollNotification n) {
-    if (n is ScrollStartNotification) {
-      _userDragging = n.dragDetails != null;
-    } else if (n is ScrollEndNotification) {
-      final dragging = _userDragging;
-      _userDragging = false;
-      if (dragging) _maybeLoadMore(n.metrics);
-    } else if (n is ScrollUpdateNotification) {
-      if (_userDragging) _maybeLoadMore(n.metrics);
-    } else if (n is UserScrollNotification &&
-        n.direction == ScrollDirection.reverse) {
-      // ⚠ 枚举与直觉相反：reverse = 往列表深处滚
-      _maybeLoadMore(n.metrics);
-    }
+    if (n is! UserScrollNotification) return false;
+    if (n.direction != ScrollDirection.reverse) return false;
+    _maybeLoadMore(n.metrics);
     return false;
   }
 

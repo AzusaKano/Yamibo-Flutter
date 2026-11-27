@@ -137,6 +137,15 @@ void main() {
     };
   }
 
+  /// 像用户那样一段一段往下划（续载判据挂在"滚动方向变化"那条通知上，
+  /// 与帖子页同一套：一次长拖到底不会触发，回到底部再划一下才触发）。
+  Future<void> dragToBottom(WidgetTester tester) async {
+    for (var i = 0; i < 4; i++) {
+      await tester.drag(find.byType(ListView), const Offset(0, -700));
+      await tester.pumpAndSettle();
+    }
+  }
+
   // ⚠ 每个用例换一个 uid：资料页有**进程内缓存**（上限 12 条，是刻意的口径），
   // 同一个 uid 会直接命中上一轮的结果，错误态就测不出来了。
   testWidgets('正常态：头卡 + 三格 + 资料表 + 主题行', (tester) async {
@@ -251,8 +260,7 @@ void main() {
         size: const Size(1080, 2400));
 
     expect(page2Calls, 0);
-    await tester.drag(find.byType(ListView), const Offset(0, -3000));
-    await tester.pumpAndSettle();
+    await dragToBottom(tester);
 
     expect(page2Calls, 1, reason: '到底续载一页，同一页不许请求两次');
     // 第二页的行已经接在后面
@@ -281,8 +289,7 @@ void main() {
     await pump(tester, const ForumProfilePage(uid: '141414'),
         size: const Size(1080, 2400));
 
-    await tester.drag(find.byType(ListView), const Offset(0, -3000));
-    await tester.pumpAndSettle();
+    await dragToBottom(tester);
 
     expect(find.text('重试'), findsOneWidget);
     expect(find.textContaining('站点返回 500'), findsOneWidget);

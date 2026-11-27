@@ -1507,18 +1507,28 @@ int _firstPositive(List<int> values) {
 
 /// 空间页（`home.php?mod=space…&do=thread&view=me`）「还有下一页吗」。
 ///
-/// ⚠ 空间页的分页条是 `<div class="page">`，**不是**板块页的 `<div class="pg">`。
-/// 里面只有「上一页 / 下一页」两个链接，**站点不给总页数**（`_totalPages()` 在
-/// 这里恒为 0，不能当页数用），所以只有这一条判据：
-/// 块里存在**带 `href` 的「下一页」**就还有下一页。
+/// ⚠ 分页条在**线上**是 `<div class="pg">`（2026-11-27 真机抓到的原文：
+/// `<div class="pg"><a class="nxt" href="…&page=2&mobile=2">下一页</a></div>`），
+/// 而我们手上那份样本写的是 `<div class="page">` —— 两种都认，别只认一种。
 ///
-/// 首尾对称，别按位置或页码分支：首页的「上一页」与末页的「下一页」
-/// 都是 `<a class="grey">`（没有 href）。只有一页时整块分页条不出现 → false。
+/// 里面没有页码、**站点不给总页数**（`_totalPages()` 认的是「共 N 页」，在这里恒为 0，
+/// 不能当页数用），所以只有这一条判据：块里存在**带 `href` 的「下一页」**就还有下一页。
+///
+/// 首尾不对称：首页只有「下一页」，末页只有「上一页」，所以不能按按钮在左/右分支，
+/// 只能看那个「下一页」自己带不带 href。
+///
+/// 判据按「逐个 `<a>` 看开标签有没有 href、文字里有没有『下一页』」来判，
+/// 不写死 `>下一页<` 这种紧邻形状：站点给按钮加图标（`<i>`）时那种写法会静默失效。
 bool userThreadsHasNext(String html) {
-  final head = RegExp(r'<div class="page[\s">]').firstMatch(html);
+  final head = RegExp(r'<div class="(?:page|pg)[\s">]').firstMatch(html);
   if (head == null) return false;
   final at = head.start;
   final close = html.indexOf('</div>', at);
   final block = html.substring(at, close < 0 ? html.length : close);
-  return RegExp(r'<a\s[^>]*href="[^"]*"[^>]*>\s*下一页\s*</a>').hasMatch(block);
+  for (final m in RegExp(r'<a\b([^>]*)>([\s\S]*?)</a>').allMatches(block)) {
+    final attrs = m.group(1) ?? '';
+    if (!attrs.contains('href=')) continue;
+    if (stripTags(m.group(2) ?? '').contains('下一页')) return true;
+  }
+  return false;
 }

@@ -154,6 +154,28 @@ void main() {
     expect(p.fields.any((f) => f.label == '最后访问'), isFalse);
   });
 
+  test('分页条：线上 div.pg + a.nxt、样本 div.page + grey，两种都要认', () {
+    // 线上原文（2026-11-27 真机抓到）：首页只有「下一页」，末尾没有「共 N 页」
+    const liveNext =
+        '<div class="pg"><a href="home.php?mod=space&uid=111111&amp;do=thread'
+        '&amp;view=me&amp;order=dateline&amp;page=2&amp;mobile=2" class="nxt">下一页</a></div>';
+    const liveLast =
+        '<div class="pg"><a href="home.php?mod=space&amp;uid=111111&amp;do=thread'
+        '&amp;page=5&amp;mobile=2" class="pre">上一页</a></div>';
+    // 样本形状（class 不同、末页把「下一页」写成 grey）
+    const sampleNext =
+        '<div class="page"><a class="grey">上一页</a><a href="a?page=2">下一页</a></div>';
+    const sampleLast =
+        '<div class="page"><a href="a?page=5">上一页</a><a class="grey">下一页</a></div>';
+
+    expect(userThreadsHasNext('<html>$liveNext</html>'), isTrue);
+    expect(userThreadsHasNext('<html>$liveLast</html>'), isFalse);
+    expect(userThreadsHasNext('<html>$sampleNext</html>'), isTrue);
+    expect(userThreadsHasNext('<html>$sampleLast</html>'), isFalse);
+    // 只有一页时整块分页条不存在
+    expect(userThreadsHasNext('<html><body>没有分页条</body></html>'), isFalse);
+  });
+
   test('名字与资料行都取不到 → PARSE（交给上层翻人话）', () {
     expect(
       () => parseUserProfile('<html><body><div class="jump_c"><p>用户空间不存在</p></div></body></html>'),
