@@ -1504,3 +1504,21 @@ int _firstPositive(List<int> values) {
   }
   return best;
 }
+
+/// 空间页（`home.php?mod=space…&do=thread&view=me`）「还有下一页吗」。
+///
+/// ⚠ 空间页的分页条是 `<div class="page">`，**不是**板块页的 `<div class="pg">`。
+/// 里面只有「上一页 / 下一页」两个链接，**站点不给总页数**（`_totalPages()` 在
+/// 这里恒为 0，不能当页数用），所以只有这一条判据：
+/// 块里存在**带 `href` 的「下一页」**就还有下一页。
+///
+/// 首尾对称，别按位置或页码分支：首页的「上一页」与末页的「下一页」
+/// 都是 `<a class="grey">`（没有 href）。只有一页时整块分页条不出现 → false。
+bool userThreadsHasNext(String html) {
+  final head = RegExp(r'<div class="page[\s">]').firstMatch(html);
+  if (head == null) return false;
+  final at = head.start;
+  final close = html.indexOf('</div>', at);
+  final block = html.substring(at, close < 0 ? html.length : close);
+  return RegExp(r'<a\s[^>]*href="[^"]*"[^>]*>\s*下一页\s*</a>').hasMatch(block);
+}

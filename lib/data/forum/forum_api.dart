@@ -474,18 +474,45 @@ Future<ForumProfile> fetchForumProfile({String uid = ''}) async {
   return parsed;
 }
 
-/// 某人「发表的主题」第一页（站点自己分页，本页十几条）。
+/// 「TA 的主题」一页：行 + 还有没有下一页。
+///
+/// 站点只给「上一页 / 下一页」，**不给总页数**，所以这里没有总页数这个概念，
+/// 只有 [hasNext]。
+class ForumUserThreads {
+  const ForumUserThreads({
+    required this.page,
+    required this.threads,
+    required this.hasNext,
+  });
+
+  final int page;
+  final List<ForumThreadSummary> threads;
+  final bool hasNext;
+}
+
+/// 某人「发表的主题」某一页（站点每页 20 条，粒度不可调）。
 ///
 /// 与板块页共用同一套行解析：空间页的主题列表行与 `forumdisplay` 同构
 /// （`li.list` + `threadlist_top/tit/mes/foot`），只取 `threads`，
 /// 不取空间页上那个「甲用户 - Ta的主题」标题当板块名。
-Future<List<ForumThreadSummary>> fetchForumProfileThreads(String uid) async {
+///
+/// 分页判定走 [userThreadsHasNext]（`div.page` 里有没有带 href 的「下一页」），
+/// **不碰 `_totalPages()`**：那套认的是「共 N 页」，在空间页恒为 0。
+Future<ForumUserThreads> fetchForumProfileThreads(
+  String uid, {
+  int page = 1,
+}) async {
   final target = _profileTarget(uid);
   final query = target.isEmpty ? '' : '&uid=$target';
   final html = await _fetchSpaceHtml(
-    '/home.php?mod=space$query&do=thread&view=me&order=dateline&mobile=2',
+    '/home.php?mod=space$query&do=thread&view=me&order=dateline'
+    '&page=$page&mobile=2',
   );
-  final data = parseBoardPage(html, fid: '', page: 1);
+  final data = parseBoardPage(html, fid: '', page: page);
   _throwIfSiteMessage(html, nothingRecognized: data.threads.isEmpty);
-  return data.threads;
+  return ForumUserThreads(
+    page: page,
+    threads: data.threads,
+    hasNext: userThreadsHasNext(html),
+  );
 }

@@ -1,9 +1,13 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 
 import '../../data/forum/forum_api.dart';
 import '../../data/forum/forum_auth.dart' show ForumSession;
 import '../../data/forum/forum_models.dart';
 import '../../data/forum/forum_user.dart';
+import '../../data/http.dart' show YmHttpError;
 import '../../design/pressable.dart';
 import '../../design/theme.dart';
 import '../../design/tokens.dart';
@@ -17,13 +21,16 @@ import 'forum_login_page.dart';
 import 'forum_thread_page.dart' show openForumThread;
 import 'forum_web.dart' show openForumWeb, openForumWafVerifyPage;
 
-/// 个人资料页（`home.php?mod=space&uid=N&mycenter=1&mobile=2`）。
+/// 个人资料页（`home.php?mod=space&uid=N&do=profile&mobile=2`）。
 ///
 /// [uid] 为空 = 我自己（用登录态里的 uid）。
 ///
 /// 一屏东西全部来自站点：头卡（名字 / 用户组 / 最后访问）、三格、签名、
-/// 资料表、TA 的主题首屏。**拿不到就不画**——缺一格少一格、缺一行少一行，
+/// 资料表、「TA 的主题」。**拿不到就不画**——缺一格少一格、缺一行少一行，
 /// 不印 `-`、不印「暂无」、不补字段（站点资料页本来就没有帖子数 / 精华数）。
+///
+/// 「TA 的主题」每页 20 条（站点粒度），滚到底**自动**续一页；站点不给总页数，
+/// 所以没有页码、没有「共 N 页」，翻到底就安静停下。
 class ForumProfilePage extends StatefulWidget {
   const ForumProfilePage({super.key, this.uid = ''});
 
@@ -34,26 +41,73 @@ class ForumProfilePage extends StatefulWidget {
 }
 
 class _ForumProfilePageState extends State<ForumProfilePage> {
-  /// 主题区首屏条数（站点自己有分页，原生翻页未做，更多去网页看）。
-  static const int _threadsOnFirstScreen = 10;
+  /// 距底多少像素开始续载（与帖子页同一数值，别另调一套）。
+  static const double _loadMoreThreshold = 600;
 
   final GlobalKey<YmAsyncState<_ProfileBundle>> _asyncKey =
       GlobalKey<YmAsyncState<_ProfileBundle>>();
   final GlobalKey _threadsKey = GlobalKey();
+  final ScrollController _scroll = ScrollController();
+
+  /// 第 2 页起追加的行。第一页不复制进来（它跟着 bundle 走）。
+  final List<ForumThreadSummary> _more = <ForumThreadSummary>[];
+
+  /// 已追加的页数（0 = 只有第一页）。
+  int _morePages = 0;
+
+  /// null = 沿用第一页的结论。
+  bool? _hasMoreOverride;
+
+  bool _loadingMore = false;
+  String? _moreError;
+  String? _moreErrorCode;
+
+  /// 这一次滚动是不是用户手拖出来的（只有手拖才判触底续载）。
+  bool _userDragging = false;
+
+  /// 当前 bundle 的身份：换了一份（登录回来重取）就把追加态清空。
+  _ProfileBundle? _seen;
+  String _threadsUid = '';
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   Future<_ProfileBundle> _load() async {
     final profile = await fetchForumProfile(uid: widget.uid);
-    var threads = const <ForumThreadSummary>[];
+    ForumUserThreads? threads;
     try {
       threads = await fetchForumProfileThreads(
         profile.uid.isNotEmpty ? profile.uid : widget.uid,
       );
     } catch (_) {
       // 主题拿不到就当没有：资料本身是真的，不该被这一块拖成整页报错
-      threads = const <ForumThreadSummary>[];
+      threads = null;
     }
     return _ProfileBundle(profile: profile, threads: threads);
   }
+
+  /// 换 bundle 就重置续载游标（只在 build 里调用，直接赋值、不 setState）。
+  void _adopt(_ProfileBundle bundle) {
+    if (identical(_seen, bundle)) return;
+    _seen = bundle;
+    _more.clear();
+    _morePages = 0;
+    _hasMoreOverride = null;
+    _loadingMore = false;
+    _moreError = null;
+    _moreErrorCode = null;
+    _threadsUid = bundle.profile.uid.isNotEmpty
+        ? bundle.profile.uid
+        : widget.uid;
+    _fillViewportIfNeeded();
+  }
+
+  bool get _hasMore => _hasMoreOverride ?? (_seen?.threads?.hasNext ?? false);
+
+  int get _loadedPage => 1 + _morePages;
 
   /// 登录门回来重取：YmAsync 只监听阅读侧账号，论坛登录得自己喊一次。
   Future<void> _openLogin() async {
@@ -76,6 +130,99 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
   void _openWeb(String path, String title) {
     openForumWeb(context, path: path, title: title);
   }
+
+  /* ------------------------------ 续载 ------------------------------ */
+
+  /// 触底续载：只认**用户手拖**出来的滚动。
+  ///
+  /// 与帖子页同一套阈值与方向口径，但多判了一处：
+  /// `UserScrollNotification` 只在手势**起手**那一下发（那时 offset 还接近 0），
+  /// 照它判的话"一次性拖到底"这一下不会触发，得再拖第二下才续载。
+  /// 所以额外在手势期间（`ScrollStartNotification` 带 `dragDetails`）跟着
+  /// `ScrollUpdateNotification` 判一次；程序化滚动（`ensureVisible` 之类）
+  /// 没有 `dragDetails`，照样不会触发首屏连环加载。
+  bool _onScroll(ScrollNotification n) {
+    if (n is ScrollStartNotification) {
+      _userDragging = n.dragDetails != null;
+    } else if (n is ScrollEndNotification) {
+      final dragging = _userDragging;
+      _userDragging = false;
+      if (dragging) _maybeLoadMore(n.metrics);
+    } else if (n is ScrollUpdateNotification) {
+      if (_userDragging) _maybeLoadMore(n.metrics);
+    } else if (n is UserScrollNotification &&
+        n.direction == ScrollDirection.reverse) {
+      // ⚠ 枚举与直觉相反：reverse = 往列表深处滚
+      _maybeLoadMore(n.metrics);
+    }
+    return false;
+  }
+
+  void _maybeLoadMore(ScrollMetrics metrics) {
+    if (_loadingMore || !_hasMore) return;
+    // 上一次失败了就等用户点「重试」，别在滚动里连环重试
+    if (_moreError != null) return;
+    if (metrics.pixels <= metrics.maxScrollExtent - _loadMoreThreshold) return;
+    unawaited(_loadMore());
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+    final next = _loadedPage + 1;
+    setState(() {
+      _loadingMore = true;
+      _moreError = null;
+      _moreErrorCode = null;
+    });
+    try {
+      final page = await fetchForumProfileThreads(_threadsUid, page: next);
+      if (!mounted) return;
+      setState(() {
+        _more.addAll(page.threads);
+        _morePages = next - 1;
+        _hasMoreOverride = page.hasNext;
+        _loadingMore = false;
+      });
+      _fillViewportIfNeeded();
+    } catch (e) {
+      if (!mounted) return;
+      // 续页失败**不清空已加载的行**：底部提示 + 页脚变重试
+      setState(() {
+        _loadingMore = false;
+        _moreError = e is YmHttpError ? e.message : '加载失败';
+        _moreErrorCode = e is YmHttpError ? e.code : null;
+      });
+    }
+  }
+
+  /// 内容没铺满一屏时补一页（每页渲染后判一次，逐页推进，不写 while 循环）。
+  void _fillViewportIfNeeded() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _loadingMore || !_hasMore || _moreError != null) return;
+      if (!_scroll.hasClients) return;
+      if (_scroll.position.maxScrollExtent <= 0) unawaited(_loadMore());
+    });
+  }
+
+  /// 续页失败的出口：WAF 去过验证、登录失效去登录，其余原样重试**同一页**。
+  Future<void> _retryMore() async {
+    if (_loadingMore) return;
+    if (_moreErrorCode == 'WAF') {
+      await openForumWafVerifyPage(context);
+    } else if (_moreErrorCode == 'LOGIN_REQUIRED') {
+      await Navigator.of(context).push(
+        ymRoute(const ForumLoginPage(), snapshot: false),
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _moreError = null;
+      _moreErrorCode = null;
+    });
+    await _loadMore();
+  }
+
+  /* ------------------------------ 构建 ------------------------------ */
 
   @override
   Widget build(BuildContext context) {
@@ -103,33 +250,43 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
   }
 
   Widget _buildBody(BuildContext context, _ProfileBundle data) {
+    _adopt(data);
     final p = data.profile;
     final stats = _buildStats(context, p);
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
-      children: [
-        YmForumProfileHead(profile: p),
-        if (stats != null) ...[const SizedBox(height: 14), stats],
-        const SizedBox(height: 14),
-        _buildActions(
-          context,
-          p,
-          self: _isSelf(p),
-          hasThreads: data.threads.isNotEmpty,
-        ),
-        if (p.signature.isNotEmpty) ...[
+    final rows = <ForumThreadSummary>[
+      ...?data.threads?.threads,
+      ..._more,
+    ];
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onScroll,
+      child: ListView(
+        controller: _scroll,
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
+        children: [
+          YmForumProfileHead(profile: p),
+          if (stats != null) ...[const SizedBox(height: 14), stats],
           const SizedBox(height: 14),
-          _SignatureCard(text: p.signature),
+          _buildActions(
+            context,
+            p,
+            self: _isSelf(p),
+            hasThreads: rows.isNotEmpty,
+          ),
+          if (p.signature.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _SignatureCard(text: p.signature),
+          ],
+          if (p.fields.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _FieldsCard(fields: p.fields),
+          ],
+          if (rows.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _buildThreads(context, p, self: _isSelf(p), rows: rows),
+          ],
+          if (rows.isNotEmpty) _buildMoreFooter(context),
         ],
-        if (p.fields.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          _FieldsCard(fields: p.fields),
-        ],
-        if (data.threads.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          _buildThreads(context, p, self: _isSelf(p), threads: data.threads),
-        ],
-      ],
+      ),
     );
   }
 
@@ -297,12 +454,12 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
     );
   }
 
-  /// TA 的主题：首屏 10 条，点行进原生帖子页（与板块页同一入口）。
+  /// TA 的主题：第一页 20 条 + 已追加的页，点行进原生帖子页（与板块页同一入口）。
   Widget _buildThreads(
     BuildContext context,
     ForumProfile p, {
     required bool self,
-    required List<ForumThreadSummary> threads,
+    required List<ForumThreadSummary> rows,
   }) {
     final c = YmScope.of(context).colors;
     return Column(
@@ -323,7 +480,7 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
         YmCardList(
           margin: EdgeInsets.zero,
           children: [
-            for (final t in threads.take(_threadsOnFirstScreen))
+            for (final t in rows)
               YmForumThreadRow(
                 thread: t,
                 onTap: () => openForumThread(context, t),
@@ -333,14 +490,82 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
       ],
     );
   }
+
+  /// 页脚：还有下一页才挂；翻到底、或第一页就是最后一页时**一个都不出现**。
+  ///
+  /// 续页失败时保留已加载的行，页脚换成出口（WAF 去验证 / 登录失效去登录 / 重试）。
+  Widget _buildMoreFooter(BuildContext context) {
+    if (!_hasMore) return const SizedBox.shrink();
+    final error = _moreError;
+    if (error == null) {
+      return YmLoadMore(
+        loading: _loadingMore,
+        hasMore: true,
+        doneText: '',
+        onTap: _loadMore,
+      );
+    }
+    final label = switch (_moreErrorCode) {
+      'WAF' => '去验证',
+      'LOGIN_REQUIRED' => '去登录',
+      _ => '重试',
+    };
+    return Column(
+      children: [
+        YmTip(error),
+        _TextAction(label: label, onTap: _retryMore),
+      ],
+    );
+  }
 }
 
-/// 资料 + 主题首屏：两次请求的结果装在一起交给界面。
+/// 资料 + 主题第一页：两次请求的结果装在一起交给界面。
 class _ProfileBundle {
   const _ProfileBundle({required this.profile, required this.threads});
 
   final ForumProfile profile;
-  final List<ForumThreadSummary> threads;
+
+  /// null = 第一页没拿到（主题区整块不画）。
+  final ForumUserThreads? threads;
+}
+
+/// 页脚文字动作（重试 / 去验证 / 去登录），与 `YmLoadMore` 的「加载更多」同档。
+class _TextAction extends StatelessWidget {
+  const _TextAction({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = YmScope.of(context).colors;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 52),
+      margin: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+      alignment: Alignment.center,
+      child: YmPressable(
+        kind: YmPressKind.row,
+        radius: BorderRadius.circular(YmRadius.ctrl),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: SizedBox(
+            height: 44,
+            child: Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: YmFont.sub13,
+                  fontWeight: FontWeight.w700,
+                  color: c.brandInk,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// 文字动作（展开 / 收起），与帖子页「还有 N 条点评」同一档。
