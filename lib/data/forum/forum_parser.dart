@@ -1347,10 +1347,14 @@ ForumProfile parseUserProfile(String html, {String uid = ''}) {
   final name = stripTags(_first(html, _profileNameRe) ?? '');
 
   // 三格：值在标签前
+  //
+  // ⚠ 只按 `class="user_box` 前缀切块，**别写成整串 `<div class="user_box cl">`**：
+  // 站点在这块上挂了 `onclick`（点三格跳积分日志），开标签是
+  // `<div class="user_box cl" onclick="…">`，整串匹配一次都不命中，三格就全成 null。
   int? totalPoints;
   int? points;
   int? partner;
-  final boxAt = html.indexOf('<div class="user_box cl">');
+  final boxAt = html.indexOf('<div class="user_box');
   if (boxAt >= 0) {
     final closeAt = html.indexOf('</ul>', boxAt);
     final chunk = html.substring(boxAt, closeAt < 0 ? html.length : closeAt);
@@ -1370,7 +1374,7 @@ ForumProfile parseUserProfile(String html, {String uid = ''}) {
 
   // 签名：单独占一个 myinfo_list 块，`<br>` 转换行（本期不做富文本）
   var signature = '';
-  final sigAt = html.indexOf('<li class="sig">');
+  final sigAt = html.indexOf('<li class="sig');
   if (sigAt >= 0) {
     final bodyAt = html.indexOf('>', sigAt) + 1;
     final end = _firstPositive([

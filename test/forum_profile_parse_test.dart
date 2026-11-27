@@ -10,6 +10,9 @@ import 'package:yamibo_flutter/data/http.dart' show YmHttpError;
 
 /// 他人视角：三格齐全 + 资料行齐全 + 签名单独一块。
 /// [total] 换掉「总积分」那一格的值（`null` = 这一格不印）。
+///
+/// ⚠ 三格那个 div 上挂着 `onclick`（线上就是这样，点三格跳积分日志），
+/// 不是干净的 `<div class="user_box cl">`——按整串找会一次都不命中。
 String otherPage({String? total = '12345', String sig = ''}) {
   final stats = <String>[
     if (total != null) '<li><span>$total</span>总积分</li>',
@@ -23,7 +26,7 @@ String otherPage({String? total = '12345', String sig = ''}) {
 <div class="avatar_m"><img src="/uc_server/data/avatar/000/11/11/11_avatar_middle.jpg"></div>
 <h2 class="name">甲用户</h2>
 </div></div>
-<div class="user_box cl"><ul>$stats</ul></div>
+<div class="user_box cl" onclick="window.location.href='home.php?mod=spacecp&amp;ac=credit&amp;op=log'"><ul>$stats</ul></div>
 <div class="myinfo_list cl"><ul>
 <li><b>个人签名</b></li>
 <li class="sig">$sig</li>
@@ -52,6 +55,21 @@ void main() {
     expect(p.totalPoints, 12345);
     expect(p.points, 12000);
     expect(p.partner, 300);
+  });
+
+  test('三格块带 onclick 属性、值尾巴带空格也要认出来（线上原样）', () {
+    // 2026-11-27 真机抓到的形状：开标签是
+    // `<div class="user_box cl" onclick="window.location.href='…'">`
+    final html = '<html><body><h2 class="name">甲用户</h2>'
+        '<div class="user_box cl" onclick="window.location.href=\'a\'"><ul>'
+        '<li><span>765</span>总积分</li><li><span>228 点</span>积分</li>'
+        '<li><span>1611 </span>对象</li></ul></div>'
+        '<div class="myinfo_list cl"><ul><li>UID<span>111111</span></li></ul></div>'
+        '</body></html>';
+    final p = parseUserProfile(html);
+    expect(p.totalPoints, 765);
+    expect(p.points, 228);
+    expect(p.partner, 1611);
   });
 
   test('资料行：值在标签后（写反了就是标签当值）', () {
