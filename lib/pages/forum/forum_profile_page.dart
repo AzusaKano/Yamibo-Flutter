@@ -9,6 +9,7 @@ import '../../data/forum/forum_models.dart';
 import '../../data/forum/forum_user.dart';
 import '../../data/http.dart' show YmHttpError;
 import '../../design/pressable.dart';
+import '../../design/text_scale.dart';
 import '../../design/theme.dart';
 import '../../design/tokens.dart';
 import '../../design/widgets/async_view.dart';
@@ -422,14 +423,18 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
         onTap: onTap,
         enabled: onTap != null,
         child: SizedBox(
+          // 46 是硬高度：系统字号放大到 2.0 时标签会把这个格子顶破，
+          // 所以这里钳住（正文不钳，见 `YmTextScale` 的口径）
           height: 46,
           child: Center(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: YmFont.body14,
-                fontWeight: FontWeight.w700,
-                color: onTap == null ? c.text3 : c.text,
+            child: YmTextScale.clampFixed(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: YmFont.body14,
+                  fontWeight: FontWeight.w700,
+                  color: onTap == null ? c.text3 : c.text,
+                ),
               ),
             ),
           ),
@@ -445,20 +450,17 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
     required bool self,
     required List<ForumThreadSummary> rows,
   }) {
-    final c = YmScope.of(context).colors;
     return Column(
       key: _threadsKey,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
-          child: Text(
-            self ? '我的主题' : 'TA 的主题',
-            style: TextStyle(
-              fontSize: YmFont.body15,
-              fontWeight: FontWeight.w700,
-              color: c.text,
-            ),
+          // 标题与卡片之间仍留 8（本页原有的量级，不比齐别的页的 9）
+          padding: const EdgeInsets.only(bottom: 8),
+          child: YmSectionHeader(
+            title: self ? '我的主题' : 'TA 的主题',
+            // 外层 ListView 已有 14 的内边距；本件默认还有 14，不置零会叠成 28
+            padding: EdgeInsets.zero,
           ),
         ),
         YmCardList(
@@ -534,14 +536,17 @@ class _TextAction extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: SizedBox(
+            // 44 定高（与 `YmLoadMore` 同档）：文字同样要钳，别被系统字号顶破
             height: 44,
             child: Center(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: YmFont.sub13,
-                  fontWeight: FontWeight.w700,
-                  color: c.brandInk,
+              child: YmTextScale.clampFixed(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: YmFont.sub13,
+                    fontWeight: FontWeight.w700,
+                    color: c.brandInk,
+                  ),
                 ),
               ),
             ),
@@ -553,6 +558,10 @@ class _TextAction extends StatelessWidget {
 }
 
 /// 文字动作（展开 / 收起），与帖子页「还有 N 条点评」同一档。
+///
+/// 外观是品牌色 w700 小字动作（不带底色、不带边框）；但字只有 12，光靠字本身
+/// 的 16px 触区远低于 40 的下限，所以**只把垂直热区**靠内边距撑到 42
+/// （12 行高 + 14×2），左右不额外加内距，观感与原来一致。
 class _MoreAction extends StatelessWidget {
   const _MoreAction({required this.label, required this.onTap});
 
@@ -568,7 +577,7 @@ class _MoreAction extends StatelessWidget {
       radius: BorderRadius.circular(YmRadius.chip),
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.symmetric(vertical: 14),
         child: Text(
           label,
           style: TextStyle(

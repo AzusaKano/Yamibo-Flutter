@@ -11,6 +11,9 @@ import 'forum_image.dart' show YmForumImage, forumAvatarUrl;
 /// 所以不取页面图：用品牌色块 + 一点低透明度装饰圆给层次，取不到的是图不画，
 /// 不是拿别的东西冒充。
 ///
+/// 圆角取**页内块档** [YmRadius.box]（16）：它和同页的三格条、动作格、签名卡、
+/// 资料表是同一层级，同屏同层级必须同档（24 是「浮起卡」档，留给弹层/摘要卡）。
+///
 /// 头像不信页面给的 `_avatar_middle`（120px，铺到 64pt×3x 会糊）：
 /// 自己按 uid 拼 `_avatar_big`（200px）。
 class YmForumProfileHead extends StatelessWidget {
@@ -25,7 +28,7 @@ class YmForumProfileHead extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: c.brand,
-        borderRadius: BorderRadius.circular(YmRadius.card),
+        borderRadius: BorderRadius.circular(YmRadius.box),
       ),
       child: Stack(
         children: [
@@ -88,9 +91,12 @@ class YmForumProfileHead extends StatelessWidget {
                         const SizedBox(height: 8),
                         Text(
                           '最后访问 ${profile.lastVisit}',
-                          style: TextStyle(
-                            fontSize: YmFont.micro11,
-                            color: Colors.white.withValues(alpha: 0.72),
+                          // 11px 白 72% 压在深色主题的 brand（#C0501A）上只有 3.2:1，
+                          // 小字读不清。改成 12px 纯白：对比度 4.77:1（浅色 14.19:1）。
+                          // 0.92 只有 4.28:1，仍差一点，所以这里不再压透明度。
+                          style: const TextStyle(
+                            fontSize: YmFont.small12,
+                            color: Colors.white,
                           ),
                         ),
                       ],
@@ -114,6 +120,11 @@ class YmForumProfileHead extends StatelessWidget {
 }
 
 /// 头卡上的用户组标签（色块底上的白字小胶囊，不参与全局 YmChip 的两档体系）。
+///
+/// 底不再用「白 18%」：深色主题的 brand 本身偏亮（#C0501A），白 18% 覆层会把
+/// 胶囊底推到 3.5:1（白 10% 也还有 4.05:1），12px 小字过不了 4.5。改成品牌淡色
+/// 覆层（[YmColors.brandTint] 24%）后，深色 6.34:1、浅色 7.39:1，两套主题
+/// 胶囊都还看得见形状——仍然只有令牌 + 透明度，没有 isDark 分支。
 class _HeadChip extends StatelessWidget {
   const _HeadChip(this.text);
 
@@ -121,16 +132,17 @@ class _HeadChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = YmScope.of(context).colors;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.18),
+        color: c.brandTint.withValues(alpha: 0.24),
         borderRadius: BorderRadius.circular(YmRadius.pill),
       ),
       child: Text(
         text,
-        style: TextStyle(
-          fontSize: YmFont.tag10,
+        style: const TextStyle(
+          fontSize: YmFont.small12,
           fontWeight: FontWeight.w700,
           color: Colors.white,
         ),
