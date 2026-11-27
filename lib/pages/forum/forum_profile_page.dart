@@ -162,8 +162,18 @@ class _ForumProfilePageState extends State<ForumProfilePage> {
     try {
       final page = await fetchForumProfileThreads(_threadsUid, page: next);
       if (!mounted) return;
+      // 跨页重复（置顶 / 公告这类行在站点侧会重复印）按 tid 去重，
+      // 与帖子页同一口径：同一 tid 只留第一行。空 tid 没法当键，原样保留。
+      final seen = <String>{
+        ...?_seen?.threads?.threads.map((t) => t.tid),
+        ..._more.map((t) => t.tid),
+      }..remove('');
+      final fresh = <ForumThreadSummary>[
+        for (final t in page.threads)
+          if (t.tid.isEmpty || seen.add(t.tid)) t,
+      ];
       setState(() {
-        _more.addAll(page.threads);
+        _more.addAll(fresh);
         _morePages = next - 1;
         _hasMoreOverride = page.hasNext;
         _loadingMore = false;

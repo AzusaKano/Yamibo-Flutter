@@ -516,3 +516,10 @@ Future<ForumUserThreads> fetchForumProfileThreads(
     hasNext: userThreadsHasNext(html),
   );
 }
+
+/// 清掉资料进程内缓存（登出 / 换号时调，从 [ForumSession.clear] 进来）。
+///
+/// 缓存里躺着的是**上一个账号**能看到的页面原文结果，还带着那一份 `formhash`：
+/// 不失效的话，退出后（或换号后）再进资料页仍会命中旧数据，界面上等于没退出。
+/// 只清这张表，不动任何登录态结构。
+void clearForumProfileCache() => _profileCache.clear();

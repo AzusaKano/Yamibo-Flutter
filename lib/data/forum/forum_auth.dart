@@ -17,6 +17,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../native_bridge.dart';
+import 'forum_api.dart' show clearForumProfileCache;
 import 'forum_http.dart';
 import 'forum_parser.dart' show discuzUid, formhash, forumUserName;
 
@@ -211,6 +212,8 @@ class ForumSession {
   static Future<void> clear() async {
     _jar.clear();
     account.value = ForumAccount.none;
+    // 资料页的进程内缓存是「上一个账号看到的东西」，得跟着一起失效
+    clearForumProfileCache();
     try {
       final file = await _sessionFile();
       if (file != null && await file.exists()) await file.delete();

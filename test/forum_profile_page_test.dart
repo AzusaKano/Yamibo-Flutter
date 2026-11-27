@@ -4,6 +4,8 @@
 // 续页失败不清空已加载的行、楼层卡作者行可点且 uid 为空时不可点。
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yamibo_flutter/data/forum/forum_api.dart' show fetchForumProfile;
+import 'package:yamibo_flutter/data/forum/forum_auth.dart' show ForumSession;
 import 'package:yamibo_flutter/data/forum/forum_http.dart';
 import 'package:yamibo_flutter/data/forum/forum_models.dart';
 import 'package:yamibo_flutter/data/http.dart' show YmHttpError;
@@ -61,6 +63,7 @@ String threadsHtml(
   int count, {
   bool hasNext = false,
   String prefix = '主题',
+  int tidBase = 203400,
 }) {
   final rows = List.generate(count, (i) => '''
 <li class="list">
@@ -69,7 +72,7 @@ String threadsHtml(
 <div class="muser"><h3><a href="/home.php?mod=space&amp;uid=111111&amp;mobile=2" class="mmc">甲用户</a></h3>
 <span class="mtime">2024-1-1</span></div>
 </div>
-<a href="/forum.php?mod=viewthread&amp;tid=${203400 + i}&amp;mobile=2">
+<a href="/forum.php?mod=viewthread&amp;tid=${tidBase + i}&amp;mobile=2">
 <div class="threadlist_tit cl"><em>$prefix $i</em></div>
 </a>
 <div class="threadlist_foot cl"><ul>
@@ -248,7 +251,8 @@ void main() {
     stubPaged(
       pages: {
         1: threadsHtml(20, hasNext: true),
-        2: threadsHtml(4, prefix: '第二页'),
+        // 第二页的 tid 与第一页不重叠（行去重按 tid，桩里重复了就会被合掉）
+        2: threadsHtml(4, prefix: '第二页', tidBase: 203420),
       },
       onThread: (url) {
         if (url.contains('page=2')) page2Calls += 1;
@@ -281,7 +285,8 @@ void main() {
     stubPaged(
       pages: {
         1: threadsHtml(20, hasNext: true),
-        2: threadsHtml(4, prefix: '第二页'),
+        // 第二页的 tid 与第一页不重叠（行去重按 tid，桩里重复了就会被合掉）
+        2: threadsHtml(4, prefix: '第二页', tidBase: 203420),
       },
       threadError: (page) =>
           page == 2 && failNext ? YmHttpError('站点返回 500', code: 'HTTP') : null,
@@ -382,5 +387,40 @@ void main() {
     await tester.tap(find.text('甲用户'));
     await tester.pump();
     expect(taps, 0);
+  });
+
+  testWidgets('跨页重复：同一 tid 只出现一次（置顶 / 公告那类行）', (tester) async {
+    stubPaged(
+      pages: {
+        1: threadsHtml(20, hasNext: true),
+        // 第 2 页前两条带着第 1 页最后两条的 tid（站点侧跨页重复的情形）
+        2: threadsHtml(4, prefix: '第二页', tidBase: 203418),
+      },
+    );
+    await pump(tester, const ForumProfilePage(uid: '151515'));
+    await tester.pumpAndSettle(); // 铺不满一屏会自动补一页
+
+    // 20 + 4 - 2 条重复 = 22
+    expect(find.byType(YmForumThreadRow), findsNWidgets(22));
+    expect(find.text('第二页 0'), findsNothing);
+    expect(find.text('第二页 2'), findsOneWidget);
+  });
+
+  // 资料缓存是「进程内、上一个账号看到的东西」：登出必须让它失效，
+  // 否则退出后（或换号后）再进资料页还会命中旧数据（还带着旧的 formhash）。
+  test('登出清资料缓存：再取会重新请求，不命中上一个账号的结果', () async {
+    var calls = 0;
+    ForumHttp.debugHandler = (url) async {
+      calls += 1;
+      return ForumRawResponse(status: 200, body: profileHtml());
+    };
+
+    await fetchForumProfile(uid: '101010');
+    await fetchForumProfile(uid: '101010');
+    expect(calls, 1, reason: '同一个人的第二次要走进程内缓存');
+
+    await ForumSession.clear();
+    await fetchForumProfile(uid: '101010');
+    expect(calls, 2, reason: '登出后缓存已清，必须重新取');
   });
 }
